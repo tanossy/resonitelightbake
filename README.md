@@ -1,6 +1,23 @@
 # ResoniteSDK Bakery Lightmap Overlay
 
-日本語版: [README.ja.md](README.ja.md)
+An overlay for the official [`Resonite.UnitySDK`](https://github.com/Yellow-Dog-Man/Resonite.UnitySDK)
+(Yellow-Dog-Man) — mainly a pipeline for importing Unity's baked lightmaps into Resonite.
+`Resonite.UnitySDK`（Yellow-Dog-Man公式）に重ねて使うオーバーレイ。Unityのベイク済み
+ライトマップをResoniteへ取り込むパイプラインが中核機能です。
+
+Jump to: [English](#english) | [日本語](#日本語) | [Folder structure / フォルダ構成](#folder-structure--フォルダ構成)
+
+**Requirements / 前提条件:** a Unity project with the official `Resonite.UnitySDK` already
+set up — this is an overlay, not a standalone SDK, and does nothing on its own. /
+公式`Resonite.UnitySDK`が既にセットアップ済みのUnityプロジェクトが必要です（単独では動作しません）。
+
+License / ライセンス: [MIT](LICENSE)
+Target branch / 対象ブランチ: `feature/water-and-audio-presets`
+Fork point / フォーク元コミット: `5eea4b03` (right after PR #117 merged / PR #117マージ直後)
+
+---
+
+## English
 
 An overlay for the official [`Resonite.UnitySDK`](https://github.com/Yellow-Dog-Man/Resonite.UnitySDK)
 (Yellow-Dog-Man) that drops cleanly on top of it — mainly adding a pipeline for importing
@@ -12,15 +29,7 @@ standalone files (see "Design principle" below).
 This repo holds the readable source tree. A ready-to-import `.unitypackage` build is
 attached to each [Release](../../releases).
 
-**Requirements:** a Unity project with the official
-[`Resonite.UnitySDK`](https://github.com/Yellow-Dog-Man/Resonite.UnitySDK) already set up —
-this is an overlay, not a standalone SDK, and does nothing on its own.
-
-License: [MIT](LICENSE) (same license as the official SDK it overlays)
-Target branch: `feature/water-and-audio-presets`
-Fork point: commit `5eea4b03` (right after PR #117 merged)
-
-## ⚠️ Updating the official SDK will wipe this overlay
+### ⚠️ Updating the official SDK will wipe this overlay
 
 The official SDK's own in-panel instructions say: *"Before installing a new version of the
 SDK, please delete the ResoniteSDK folder first!"* Since this overlay's files live inside
@@ -42,7 +51,7 @@ fork-point commit to check whether anything upstream needs to be manually re-mer
 API, zero commits of drift, no open PRs pending. That will very likely change over time, so
 don't assume it's still current just because it says so here — check for yourself.)*
 
-## Installation
+### Installation
 
 1. Set up the latest `Resonite.UnitySDK` in your Unity project as usual
 2. Download the `.unitypackage` from the [latest Release](../../releases/latest), then
@@ -52,9 +61,9 @@ don't assume it's still current just because it says so here — check for yours
 3. Import with everything checked
 4. Once compilation finishes, connect as usual from `Resonite SDK > Open Resonite SDK Manager`
 
-## Usage
+### Usage
 
-### Normal scene send
+#### Normal scene send
 
 1. Open `Resonite SDK > Open Resonite SDK Manager`
 2. Connect via AutoDiscovery (recommended) or Manual (specify a port)
@@ -72,7 +81,7 @@ don't assume it's still current just because it says so here — check for yours
    timeout or WebSocket disconnect, use `Reset conversion state` in the Debug Tools window
    and resend
 
-### Debugging / partial sends
+#### Debugging / partial sends
 
 Open `Resonite SDK > Open Debug Tools` (requires `Resonite SDK Manager` to already be
 connected):
@@ -88,7 +97,7 @@ connected):
 - **Reset conversion state** — rebuilds `SceneConverter` and also runs the two cleanups
   above. The go-to recovery step when the connection gets into a bad state
 
-### Objects excluded automatically
+#### Objects excluded automatically
 
 The following are automatically excluded from the set of scene roots sent
 (`SceneRootFilter.cs`):
@@ -100,7 +109,7 @@ The following are automatically excluded from the set of scene roots sent
 
 Nested child objects are not currently handled (only root-level objects are filtered).
 
-### Baked lightmap → Resonite import
+#### Baked lightmap → Resonite import
 
 A pipeline that approximates Bakery (if installed) or Unity's built-in Progressive
 Lightmapper baked lightmaps in Resonite. Operational notes:
@@ -115,7 +124,7 @@ Lightmapper baked lightmaps in Resonite. Operational notes:
 - If brightness or metallic response doesn't match on the real client, adjust the static
   values in `LightTuning.cs` / `BakedLightmapStandardConverter.cs` (see below)
 
-### Send-time brightness/color tuning (live-tuned values)
+#### Send-time brightness/color tuning (live-tuned values)
 
 There's a real gap between how a scene looks in the Unity Editor and how it looks on a
 live Resonite client. The following static values were tuned iteratively against a running
@@ -135,10 +144,9 @@ client. To change them, edit the field directly in code (there's no in-panel UI 
 ignore the scalar coefficients entirely (the `PBSMultiUV.shader`'s `_METALLICMAP` branch
 reads R=Metallic/A=Smoothness straight from the texture). Those four materials had their
 textures re-baked directly at Metallic=0, Smoothness×8/9 (`*_MetallicSmoothness.png`,
-DXT5 with alpha). Full history in
-`C:/urd/wiki/concepts/resonite/dev-recipes/2026-08-08_rezo_con_baked_lightmap_metallic_compensation_values.md`.
+DXT5 with alpha).
 
-### Tonemap Compensation (experimental)
+#### Tonemap Compensation (experimental)
 
 Reproduces Unity PPv2's Neutral Tonemapper-style color compression and applies it (to
 material colors — AlbedoColor/EmissiveColor, saturation only — and to Reflection Probe
@@ -146,106 +154,68 @@ intensity). Resonite's renderer (Renderite) does no camera-side post-process ton
 so the same HDR values look glarier/blown-out in Resonite than they did tonemapped in
 Unity. Toggle it from the panel's "Send Tonemap Compensation" checkbox (default ON).
 
-## What this does (feature summary)
+**Currently only the Reflection Probe half has a visible effect.** The material-color half
+(`ColorGradingApproximation.Apply`) applies saturation only, and saturation adjustment is a
+mathematical no-op on achromatic (white/gray, r=g=b) colors — verified live: AlbedoColor
+stayed exactly `(1,1,1)` with the toggle on. Since almost every material in the reference
+scene has `_Color = white` (the actual color comes from its texture, not this field), this
+half of the feature currently does nothing observable there. It would matter for a material
+with a genuinely tinted `_Color`, or if `ColorGradingApproximation.Apply()` were switched
+back to full grading (`ApplyGrading()` instead of `ApplySaturationOnly()` — see that file's
+comments for why full grading was tried and reverted).
 
-### 1. Baked lightmap import into Resonite (this package's headline feature)
+### What this does (feature summary)
 
-- Imports Bakery (if installed) or Unity's Progressive Lightmapper bake results, approximating
-  Resonite's lack of a baked-GI system via a `SecondaryAlbedoTexture` multiply
-  (`LightmapDecoder.cs`/`LightmapMaterialCache.cs`/`BakedLightmapStandardConverter.cs`/
-  `BakedLightmapStandard.shader`/`DirectionalLightmapBaker.cs`, all new)
-- Lightmap preview textures are capped at 256px on send (restored from an earlier 64px
-  stopgap; tunable via `LightmapDecoder.MaxPreviewTextureSize`)
-- Generated lightmap textures (under `Assets/ResoniteSDK/Generated/LightmapVariants/`) are
-  sent as raw pixel data instead of via file import (`Texture2DConverter.cs`) — file-path
-  import wasn't always picking up regenerated diffs
-- Skips generating/uploading the desaturated "additive fill" companion texture entirely
-  when `AdditiveFillStrength` is 0 (the current default) — see "Structural notes" below
+1. **Baked lightmap import into Resonite** (this package's headline feature) — imports
+   Bakery (if installed) or Unity's Progressive Lightmapper bake results, approximating
+   Resonite's lack of a baked-GI system via a `SecondaryAlbedoTexture` multiply
+   (`LightmapDecoder.cs`/`LightmapMaterialCache.cs`/`BakedLightmapStandardConverter.cs`/
+   `BakedLightmapStandard.shader`/`DirectionalLightmapBaker.cs`, all new). Lightmap preview
+   textures are capped at 256px on send (tunable via `LightmapDecoder.MaxPreviewTextureSize`).
+   Generated lightmap textures are sent as raw pixel data instead of via file import
+   (`Texture2DConverter.cs`). Skips generating/uploading the desaturated "additive fill"
+   companion texture entirely when `AdditiveFillStrength` is 0 (the current default) — see
+   "Structural notes" below.
+2. **Tonemap Compensation** (experimental, new) — `PPv2ToneMapMath.cs` reproduces Unity
+   `com.unity.postprocessing@3.4.0`'s grading pipeline (LogC-space Contrast/WhiteBalance/
+   Saturation/NeutralTonemap); `ColorGradingApproximation.cs` is the material-color
+   application point; `ReflectionProbeConverter.cs` applies it to Reflection Probe intensity.
+   Lives in its own `Assets/ResoniteSDK/ToneMapCompensation/` folder.
+3. **Send-time light tuning** (new, already externalized) — `LightTuning.cs` consolidates
+   the overall light brightness multiplier and white-shift blend into one file
+   (`LightConverter.cs` itself is untouched apart from a 2-line call-out).
+4. **Scene-import hygiene** (new, already externalized):
+   - Camera / Missing Prefab exclusion — `SceneRootFilter.cs`
+   - ID-collision-proof allocation — `GlobalIdAllocator.cs`, a process-wide, monotonically
+     increasing static counter (fixes an `"ID '...' already in use"` FATAL ERROR)
+   - Duplicate-tree prevention on reconnect — `ImportRootSlotHelper.cs`
+   - Asset-identity bug fix — `AssetConversionManager.cs`, switched the identity key from
+     reference equality to GUID + local file ID (fixes multiple sub-assets inside the same
+     .fbx getting mixed up)
+   - 60-second timeout — `AssetConverter.cs`, throws if an asset conversion hangs
+5. **Panel cleanup** (new file, no need to touch upstream) — `ResoniteLinkWindow.cs` (main
+   panel) trimmed to just connect / Send Current Scene / Realtime Mode plus 3 toggles;
+   partial-send/cleanup/reset tools moved to a new `ResoniteSDKDebugWindow.cs`
+   (`Resonite SDK > Open Debug Tools`).
+6. **Automatic water-material detection** (new) — `WaterPanningConverter.cs` detects any
+   custom shader whose name contains "water" and converts it to the community-standard
+   water pattern (PBS_Metallic + Panner2D UV scroll).
+7. **Audio effect conversion** (new, not yet verified on a live client) —
+   `AudioEffectConverter.cs` converts Unity's `AudioReverbFilter` to Resonite's
+   `AudioZitaReverb`, mapped from the public Zita-Rev1 algorithm.
+8. **Post-processing conversion** (new) — `PostProcessingConverter.cs` converts a PPv2
+   Global Volume to Resonite's `PostProcessingSettings` (5 fields only).
+9. **Particle system conversion bug fixes** — `ParticleSystemConverter.cs`: BoxShell/BoxEdge
+   shapes producing no emitter, Cone shape's Height being miscopied, Over Lifetime modules
+   not converting, the Emission-enabled gate being missed, legacy particle shaders not
+   handled.
+10. **Other bug fixes** — partial-send guards in `MeshColliderConverter.cs`/
+    `MeshRendererConverter.cs`/`StandardBaseConverter.cs`; a mixed-lightmap-eligibility
+    warning in `MeshRendererConverter.cs`; a Unity "fake null" crash fix and SH2 default-off
+    in `SkyboxConverter.cs`; assorted fallback handling in `Texture2DConverter.cs`/
+    `StandardConverter.cs`/`UnlitConverter.cs`.
 
-### 2. Tonemap Compensation (experimental, new)
-
-- `PPv2ToneMapMath.cs`: reproduces Unity `com.unity.postprocessing@3.4.0`'s grading
-  pipeline (LogC-space Contrast/WhiteBalance/Saturation/NeutralTonemap)
-- `ColorGradingApproximation.cs`: the material-color application point (saturation only,
-  `MaterialGradingEnabled`)
-- `ReflectionProbeConverter.cs`: application to Reflection Probe intensity
-  (`ComputeReflectionProbeCompensationFactor()`)
-- Implementation lives in its own `Assets/ResoniteSDK/ToneMapCompensation/` folder,
-  separate from the main SDK
-
-### 3. Send-time light tuning (new, already externalized)
-
-- `LightTuning.cs`: consolidates the overall light brightness multiplier and white-shift
-  blend into one file (`LightConverter.cs` itself is untouched apart from a 2-line call-out)
-
-### 4. Scene-import hygiene (new, already externalized)
-
-- **Camera / Missing Prefab exclusion**: `SceneRootFilter.cs` — automatically excludes
-  Unity's own Camera and any Missing Prefab root (e.g. left over from importing a VRChat
-  world) from the send
-- **ID-collision-proof allocation**: `GlobalIdAllocator.cs` — switched to a process-wide,
-  monotonically increasing static counter. Guarantees the same ID string can never be
-  generated twice for the lifetime of the Unity Editor process, even if `SceneConverter` is
-  rebuilt with an unchanged `UniqueSessionId` across a reconnect (fixes an `"ID '...'
-  already in use"` FATAL ERROR)
-- **Duplicate-tree prevention**: `ImportRootSlotHelper.cs` — on reconnect, checks for an
-  existing `Unity Import` slot directly under World Root and deletes/rebuilds it instead of
-  leaving a duplicate
-- **Asset-identity bug fix**: `AssetConversionManager.cs` — switched the identity key from
-  reference equality to GUID + local file ID. Fixes a real bug where multiple sub-assets
-  inside the same .fbx (Cube/curtain/Cylinder, etc.) were incorrectly treated as the same
-  asset, causing meshes to get mixed up
-- **60-second timeout**: `AssetConverter.cs` — throws if an asset conversion hangs, so it's
-  detectable (mitigation for a known ResoniteLink WebSocket desync issue)
-
-### 5. Panel cleanup (new file, no need to touch upstream)
-
-- `ResoniteLinkWindow.cs` (main panel) trimmed down to just connect / Send Current Scene /
-  Realtime Mode plus 3 toggles
-- Partial-send testing, cleanup, and state-reset tools moved to a new
-  `ResoniteSDKDebugWindow.cs` (`Resonite SDK > Open Debug Tools`). It only calls public
-  methods already on `ResoniteLinkWindow` — no duplicated logic
-
-### 6. Automatic water-material detection (new)
-
-- `WaterPanningConverter.cs`: detects any custom shader whose name contains "water" and
-  converts it to the community-standard water pattern seen in real Resonite worlds
-  (PBS_Metallic + Panner2D UV scroll)
-
-### 7. Audio effect conversion (new, not yet verified on a live client)
-
-- `AudioEffectConverter.cs`: converts Unity's `AudioReverbFilter` to Resonite's
-  `AudioZitaReverb`. Parameter mapping is inferred from the public Zita-Rev1 algorithm
-  (Resonite's actual in-world audio behavior has not been verified — only compile
-  correctness and mapping-logic soundness have been checked)
-
-### 8. Post-processing conversion (new)
-
-- `PostProcessingConverter.cs`: converts a PPv2 Global Volume to Resonite's
-  `PostProcessingSettings` (only 5 fields: MotionBlur/Bloom/AO intensity, SSR on/off, AA
-  method)
-
-### 9. Particle system conversion bug fixes
-
-- `ParticleSystemConverter.cs`: fixes for BoxShell/BoxEdge shapes producing no emitter at
-  all, Cone shape's Height being miscopied, Over Lifetime modules not converting, the
-  Emission-enabled gate being missed, and legacy particle shaders (Alpha Blended/Additive)
-  not being handled
-
-### 10. Other bug fixes
-
-- `MeshColliderConverter.cs`/`MeshRendererConverter.cs`/`StandardBaseConverter.cs`, etc.:
-  added guards so `Send Meshes/Materials/Lightmaps Only` partial sends don't accidentally
-  send out-of-scope data (meshes, source textures, etc.)
-- `MeshRendererConverter.cs`: logs a warning when a renderer ends up with a mixed outcome
-  (some material slots lightmap-eligible, some not — non-Standard shader, etc.)
-- `SkyboxConverter.cs`: fixed a `MissingReferenceException` from touching Unity's "fake
-  null" references after a domain reload. Spherical-harmonics (SH2) conversion is disabled
-  by default (`ConvertSphericalHarmonics = false`) since it isn't serializable
-- `Texture2DConverter.cs`/`StandardConverter.cs`/`UnlitConverter.cs`: assorted fallback
-  handling for missing properties and legacy-shader support tied to items 1 and 9 above
-
-## Design principle: minimize the diff against official files
+### Design principle: minimize the diff against official files
 
 With open-sourcing in mind, the guiding rule for this work has been: **keep changes to
 official SDK files down to a handful of call-out lines, and externalize all real logic and
@@ -265,11 +235,11 @@ Already applied: `SceneConverter.cs` → `SceneRootFilter.cs` / `GlobalIdAllocat
 **Not yet externalized** (official files that still carry a larger diff):
 `AssetConverter.cs` (the 60-second timeout mechanism), `AssetConversionManager.cs` (the
 asset-identity logic), `ConversionPassState.cs` (a genuinely new file — the partial-send
-pass enum doesn't exist upstream so there's nothing to externalize away from), `StandardConverter.cs`/
-`StandardSpecularConverter.cs` (a couple of guard lines each), `MeshRendererConverter.cs`/
-`MeshColliderConverter.cs` (partial-send guards).
+pass enum doesn't exist upstream so there's nothing to externalize away from),
+`StandardConverter.cs`/`StandardSpecularConverter.cs` (a couple of guard lines each),
+`MeshRendererConverter.cs`/`MeshColliderConverter.cs` (partial-send guards).
 
-## Structural notes (2026-08-08 review, lightbake feature only)
+### Structural notes (2026-08-08 review, lightbake feature only)
 
 A dedicated review of the lightbake-specific files found one concrete piece of wasted
 work, since fixed:
@@ -277,8 +247,7 @@ work, since fixed:
 - With `AdditiveFillStrength = 0` (the current tuned default), the additive-fill mechanism
   contributes nothing — `SecondaryEmissiveColor` is pure black regardless of what texture
   feeds it. Before the fix, `LightmapMaterialCache.cs` unconditionally decoded a
-  desaturated "gray" companion texture for every lightmap on every send (a second full
-  RenderTexture blit + resize + PNG encode + AssetDatabase import pass), and
+  desaturated "gray" companion texture for every lightmap on every send, and
   `BakedLightmapStandardConverter.cs` unconditionally uploaded it to Resonite over
   ResoniteLink — all for zero visual effect. Both are now gated behind
   `AdditiveFillStrength > 0`; raising the value again re-enables the full path exactly as
@@ -289,7 +258,268 @@ work, since fixed:
   since the reference scene uses a NonDirectional bake. Not flagged as waste — just an
   observation for anyone auditing code size.
 
-## Folder structure
+### Not included
+
+- `Assets/ResoniteSDK/Generated/` (scene-specific generated output) is deliberately
+  excluded
+- `Assets/Editor/LightmapTestHarness.cs` and friends (the file-driven real-machine test
+  automation harness — its own header comment explicitly says "test-only, not part of the
+  SDK fork")
+
+### Known open issues
+
+- ResoniteLink.dll occasionally drops the WebSocket mid-send in an unsynchronized way (a
+  candidate for an upstream issue report; `AssetConverter.cs`'s 60-second timeout only
+  detects this, it doesn't fix the root cause)
+- `AudioEffectConverter.cs` has not been verified against real in-world audio in Resonite
+- `LightTuning.WhiteBalanceShift` blends every light toward white uniformly regardless of
+  its original hue, so a scene with multiple differently-colored lights would have those
+  color differences washed out evenly (this SDK's reference scene uses a single warm color
+  scheme, so multi-color support hasn't been built yet)
+- Whether the MetallicMap's alpha channel affects Albedo visibility on a real Resonite
+  client (user-reported, unconfirmed) is an open question
+
+---
+
+## 日本語
+
+`Resonite.UnitySDK`（Yellow-Dog-Man公式）の最新版に、そのまま重ねて使えるUnityPackage。
+公式ファイルへの変更は最小限に抑え、新機能・調整値のロジックはできる限り新規ファイルへ
+外だししてある（詳細は「設計方針」参照）。
+
+このリポジトリはソースツリーを閲覧できる形で公開しています。すぐにインポートできる
+`.unitypackage`は各[Release](../../releases)に添付しています。
+
+### ⚠️ 公式SDKアップデート時にこのオーバーレイは消えます
+
+公式SDK自体のパネル内注意書きには「新しいバージョンのSDKをインストールする前に、必ず
+ResoniteSDKフォルダを削除してください」とあります。このオーバーレイのファイル（新規ファイル・
+公式ファイルへの変更の両方）は同じ`Assets/ResoniteSDK/`フォルダ配下に置かれているため、
+この公式の手順に従うと**このオーバーレイは完全に消えます**——部分的・静かに壊れるのではなく、
+完全な消滅です。公式アップデート後は、このオーバーレイのパッケージを再インポートしないと
+機能が戻りません。
+
+もう1つ、より見えにくいリスクがあります。このオーバーレイが変更する公式ファイル（下記
+フォルダ構成の「[公式・変更あり]」参照）は「パッチ」ではなく「完全な差し替えファイル」として
+配布しています。もし公式SDKがこのオーバーレイのフォーク元以降に同じファイルへ変更を加えていた
+場合、公式アップデート後にこのオーバーレイを再適用すると**それらのファイルがフォーク元時点の
+内容へ巻き戻り**、公式側が加えた変更を静かに消してしまいます。公式アップデート後にこの
+オーバーレイを再適用する前に、対象ファイルをこのリポジトリのフォーク元コミットと比較し、
+上流側の変更を手動でマージし直す必要が無いか確認してください。
+
+*（2026-08-08時点の状況: このフォーク元コミット`5eea4b03`は`Yellow-Dog-Man/Resonite.UnitySDK`の
+`main`ブランチ先端と完全に一致しています——GitHub APIで直接確認済み、差分ゼロ・オープンPRも
+無し。ただしこれは時間とともに変わる前提で書いているので、ここに書いてあるからといって
+「今も最新のはず」と思い込まず、自分で確認してください。）*
+
+### 導入方法
+
+1. 最新の `Resonite.UnitySDK` をUnityプロジェクトへ通常通りセットアップする
+2. [最新のRelease](../../releases/latest)から`.unitypackage`をダウンロードし、
+   ダブルクリックまたはUnityの`Assets > Import Package > Custom Package...`からインポート
+   （ソースをgit管理したい場合は、このリポジトリの`Assets/ResoniteSDK/`を直接
+   プロジェクトへコピーしてもよい）
+3. 全チェックを入れたままImport
+4. コンパイル完了後、`Resonite SDK > Open Resonite SDK Manager` から通常通り接続
+
+### 使い方
+
+#### 通常のシーン送信
+
+1. `Resonite SDK > Open Resonite SDK Manager` を開く
+2. AutoDiscovery（推奨）または Manual（ポート指定）で接続
+3. 必要に応じて3つのトグルを確認:
+   - **Convert Skybox** — スカイボックス（Material/ReflectionProbe）も一緒に送るか
+   - **Force Refresh Generated Lightmaps** — 生成済みライトマップ差分ファイルを毎回強制再生成するか
+   - **Send Tonemap Compensation (experimental)** — マテリアル色/Reflection Probe強度への
+     トーンマップ近似補正を掛けるか（下記「Tonemap Compensation」参照。デフォルトON）
+4. `Send Current Scene` を押す。World Root直下に単一の `Unity Import` スロットが作られ
+   （既存があれば削除してから作り直す＝再送信しても重複しない）、その下に全内容が入る
+5. 送信中は `AssetConverter.cs` 側に60秒のタイムアウトが設定されている。
+   タイムアウトやWebSocket切断が起きたら「デバッグツール」の `Reset conversion state` →
+   再送信で復帰できる
+
+#### デバッグ・部分送信
+
+`Resonite SDK > Open Debug Tools` を開く（`Resonite SDK Manager` が先に接続されている必要あり）:
+
+- **Send Meshes Only / Send Materials Only / Send Lightmaps Only** — フルシーン送信をやり直さず
+  一部だけ再送信したい時に使用（`ConversionPassState.ActivePass` で内部的に何を送るか絞り込む）
+- **Retry Missing Asset URLs** — アセットアップロードだけ失敗して他は成功している場合に使用
+- **Log Messages JSON** — 送信メッセージをJSONでログ出力（デバッグ用、デフォルトOFF）
+- **Cleanup converters in the scene / Cleanup Resonite Components in the scene** —
+  変換用ヘルパーコンポーネントをシーンから一括削除
+- **Reset conversion state** — `SceneConverter` を作り直し、上記2つのクリーンアップも実行。
+  接続がおかしくなった時の基本の復旧手段
+
+#### 除外されるオブジェクト
+
+送信対象のシーンルートから、以下は自動的に除外される（`SceneRootFilter.cs`）:
+
+- `UnityEngine.Camera` を持つルート（Resoniteは独自のカメラ系を持つため不要）
+- Missing Prefab状態のルート（VRChatワールドをインポートした際の `VRCWorld` 等、
+  ソースアセットが存在せず変換しようがないもの）
+
+子オブジェクトとして紛れ込んでいる場合は未対応（現状はシーン直下のルート単位の判定のみ）。
+
+#### ライトマップベイク → Resonite取り込み
+
+Bakery（導入されていれば）またはUnity標準Progressive Lightmapperでベイクしたライトマップを
+Resonite側でも近い見た目に近似するパイプライン。運用の要点:
+
+- ベイク後は毎回 `Send Current Scene`（または `Send Lightmaps Only`）でOK。
+  `Force Refresh Generated Lightmaps` がONなら差分ファイルを都度作り直す
+- Resoniteはベイク済みGI（間接光）機構を持たないため、`BakedLightmapStandardConverter` が
+  ベイクデータをマテリアルの `SecondaryAlbedoTexture`（乗算）へ焼き込むことで近似している。
+  Resonite側で実ライト（`LightConverter`経由）も同時に有効なままにする設計
+  （下記「送信時の明るさ・色調整」参照）
+- 明るさ・金属感が実機で合わない場合は `LightTuning.cs` / `BakedLightmapStandardConverter.cs` の
+  各static値を調整する（後述）
+
+#### 送信時の明るさ・色調整（実機チューニング値）
+
+Unity上での見た目とResonite実機での見た目にギャップがあり、以下のstatic値を実機検証しながら
+調整している。値を変えたい場合はコード内の該当フィールドを直接編集する（UI化はしていない）:
+
+| ファイル | フィールド | 現在値 | 意味 |
+|---|---|---|---|
+| `LightTuning.cs` | `IntensityMultiplier` | 1.8 | 全ライト共通、Unity側`Light.intensity`への掛け率 |
+| `LightTuning.cs` | `WhiteBalanceShift` | 0.7 | 光源色を送信時だけ白側へブレンド（0=元の色, 1=純白）|
+| `LightmapDecoder.cs` | `RangeScale` | 1.1 | ベイクデータのデコード前ゲイン |
+| `LightmapDecoder.cs` | `ColorSaturationCompensation` | 0.6 | ベイクデータ自体の彩度低減（0〜1）|
+| `BakedLightmapStandardConverter.cs` | `SmoothnessCompensation` | 0.05 | スカラーSmoothnessへの係数（MetallicMap無しの材質のみ有効）|
+| `BakedLightmapStandardConverter.cs` | `MetallicCompensation` | 0.0 | スカラーMetallicへの係数（同上）|
+| `BakedLightmapStandardConverter.cs` | `AdditiveFillStrength` | 0.0 | ベイクデータの加算フィル強度（現在無効、乗算のみ）|
+
+**MetallicMapがあるマテリアル**（couch01/lights/tables/wall_door）はスカラー係数が無視される
+（`PBSMultiUV.shader`の`_METALLICMAP`分岐でR=Metallic/A=Smoothnessをテクスチャから直接読む
+ため）。この4マテリアルはテクスチャ自体をMetallic=0・Smoothness×8/9で焼き直し済み
+（`*_MetallicSmoothness.png`、DXT5・アルファ有り）。
+
+#### Tonemap Compensation（実験的機能）
+
+UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリアル色
+（AlbedoColor/EmissiveColor、彩度のみ）とReflection Probe強度に反映する。Resonite
+(Renderite)は主カメラのポスト処理トーンマッピングを持たないため、同じHDR値でもUnity側より
+反射・発光がぎらつく問題への対策。パネルの「Send Tonemap Compensation」トグルでON/OFF可能
+（デフォルトON）。
+
+**現状、実際に見た目へ効いているのはReflection Probe側のみ。** マテリアル色側
+（`ColorGradingApproximation.Apply`）は彩度のみを適用する実装になっているが、彩度調整は
+無彩色（白・グレー、r=g=b）に対しては数式上no-op（実機確認済み: トグルON時もAlbedoColorが
+`(1,1,1)`のまま変化なし）。参照シーンのマテリアルはほぼ全て`_Color=白`固定（実際の色味は
+テクスチャ由来でこのフィールドではない）ため、この機能のマテリアル色側は現状観測可能な効果が
+無い。実際に色味付きの`_Color`を持つマテリアルであれば効果が出る、あるいは
+`ColorGradingApproximation.Apply()`をフルグレーディング（`ApplySaturationOnly()`ではなく
+`ApplyGrading()`）に戻せば違いが出る（フルグレーディングを試して差し戻した経緯は同ファイルの
+コメント参照）。
+
+### 何を行っているか（機能別サマリ）
+
+1. **ベイクライトマップのResonite取り込み**（本パッケージの中核機能） — Bakery（導入されて
+   いれば）またはUnity標準Progressive Lightmapperのベイク結果を、Resoniteに存在しない
+   「ベイクGI」を`SecondaryAlbedoTexture`乗算で近似して転送（`LightmapDecoder.cs`/
+   `LightmapMaterialCache.cs`/`BakedLightmapStandardConverter.cs`/`BakedLightmapStandard.shader`/
+   `DirectionalLightmapBaker.cs`、全て新規）。ライトマッププレビュー用テクスチャは256px上限で
+   送信（`LightmapDecoder.MaxPreviewTextureSize`で調整可能）。生成ライトマップテクスチャは
+   ファイルインポートではなく生ピクセルデータとして送信（`Texture2DConverter.cs`）。
+   `AdditiveFillStrength`が0（現在の既定値）の場合、加算フィル用のデサチュレートテクスチャの
+   生成・アップロード自体をスキップ（詳細は下記「構造上の所見」参照）。
+2. **Tonemap Compensation**（実験的、新規） — `PPv2ToneMapMath.cs`がUnity
+   `com.unity.postprocessing@3.4.0`のグレーディングパイプライン（LogC空間Contrast/
+   WhiteBalance/Saturation/NeutralTonemap）を再現。`ColorGradingApproximation.cs`が
+   マテリアル色への適用口、`ReflectionProbeConverter.cs`がReflection Probe強度への適用。
+   本体SDKと独立した`Assets/ResoniteSDK/ToneMapCompensation/`フォルダに実装を分離。
+3. **送信時ライト調整**（新規、外だし済み） — `LightTuning.cs`がライト全体の明るさ倍率・
+   白色寄せブレンドを1ファイルに集約（`LightConverter.cs`本体は公式のまま、呼び出し2行のみ変更）。
+4. **シーン取り込み衛生**（新規、外だし済み）:
+   - Camera/Missing Prefab除外 — `SceneRootFilter.cs`
+   - ID採番の衝突防止 — `GlobalIdAllocator.cs`（プロセス全体で単調増加するstaticカウンタ、
+     `"ID '...' already in use"` FATAL ERROR対策）
+   - 重複ツリー防止 — `ImportRootSlotHelper.cs`（再接続時、既存の`Unity Import`スロットを
+     削除してから作り直す）
+   - アセット同一性判定のバグ修正 — `AssetConversionManager.cs`（判定キーをGUID+
+     ローカルファイルIDベースに変更、同一.fbx内の複数サブアセットの取り違えを修正）
+   - 60秒タイムアウト — `AssetConverter.cs`（アセット変換がハングした場合に検知可能にする）
+5. **パネル整理**（新規、外だし不要＝独自ファイル） — `ResoniteLinkWindow.cs`（メインパネル）
+   は接続・Send Current Scene・Realtime Mode・3トグルのみに整理。部分送信テスト・
+   クリーンアップ・状態リセット等は新規`ResoniteSDKDebugWindow.cs`
+   （`Resonite SDK > Open Debug Tools`）へ分離。
+6. **水面マテリアル自動検出**（新規） — `WaterPanningConverter.cs`がシェーダー名に"water"を
+   含む任意のカスタムシェーダーを検出し、実在するResoniteワールドの水面表現パターン
+   （PBS_Metallic + Panner2D UVスクロール）へ変換。
+7. **オーディオエフェクト変換**（新規、未実機検証） — `AudioEffectConverter.cs`がUnity
+   `AudioReverbFilter`をResonite `AudioZitaReverb`へ、Zita-Rev1アルゴリズムに基づく
+   推定マッピングで変換。
+8. **ポストプロセス変換**（新規） — `PostProcessingConverter.cs`がPPv2のGlobal Volumeを
+   Resonite `PostProcessingSettings`（5項目のみ）へ変換。
+9. **パーティクルシステム変換バグ修正** — `ParticleSystemConverter.cs`: BoxShell/BoxEdge
+   形状でエミッターが生成されない不具合、Cone形状のHeight誤代入、Over Lifetimeモジュール
+   未変換、Emission enabled判定漏れ、レガシーパーティクルシェーダー未対応を修正。
+10. **その他バグ修正** — `MeshColliderConverter.cs`/`MeshRendererConverter.cs`/
+    `StandardBaseConverter.cs`等の部分送信ガード、`MeshRendererConverter.cs`の混在時警告、
+    `SkyboxConverter.cs`のfake-null対策・SH2デフォルト無効化、`Texture2DConverter.cs`/
+    `StandardConverter.cs`/`UnlitConverter.cs`のフォールバック処理。
+
+### 設計方針: 公式ファイルへの変更を最小化
+
+オープンソース公開を見据え、**公式SDKファイルへの変更はできる限り呼び出し1〜3行に留め、
+実質的なロジック・調整値は全て新規ファイルへ外だしする**方針で作業している。
+
+例（`LightConverter.cs`）:
+```csharp
+// 公式ファイル側の変更はこの2行のみ
+resonite.Intensity = LightTuning.ApplyIntensity(unity.intensity);
+resonite.Color = new ColorX(LightTuning.ApplyColor(unity.color));
+```
+実体（倍率・ロジック）は同フォルダの新規`LightTuning.cs`側に完全分離。
+
+同様のパターンを適用済み: `SceneConverter.cs`→`SceneRootFilter.cs`/`GlobalIdAllocator.cs`/
+`ImportRootSlotHelper.cs`、`LightConverter.cs`→`LightTuning.cs`。
+
+**外だし未着手**（公式ファイル自体への変更がまだ多く残っている箇所）:
+`AssetConverter.cs`（60秒タイムアウト機構）、`AssetConversionManager.cs`
+（アセット同一性判定ロジック）、`ConversionPassState.cs`（部分送信パスの列挙型自体は
+公式に存在しないため外だし不可、これは新規ファイル）、`StandardConverter.cs`/
+`StandardSpecularConverter.cs`（各2行程度のガード）、`MeshRendererConverter.cs`/
+`MeshColliderConverter.cs`（部分送信ガード）。
+
+### 構造上の所見（2026-08-08レビュー、ライトベイク機能のみ対象）
+
+ライトベイク機能に絞った構造レビューで、具体的なムダを1件発見・修正済み:
+
+- `AdditiveFillStrength = 0`（現在の確定値）の場合、加算フィル機構は視覚的に一切効果が無い
+  （`SecondaryEmissiveColor`が常に真っ黒になるため、何を掛けても結果はゼロ）。修正前は
+  `LightmapMaterialCache.cs`が毎回無条件でデサチュレート版「gray」テクスチャをデコード
+  （RenderTexture blit + リサイズ + PNG encode + AssetDatabaseインポートのフルパス）し、
+  `BakedLightmapStandardConverter.cs`がそれを毎回Resoniteへアップロードしていた——完全に
+  無駄な処理。両箇所とも`AdditiveFillStrength > 0`の時だけ動くようガードした（機構自体は
+  温存、値を戻せば従来通り動作）。実機検証済み：修正後は送信のたびに`LMTex_N_gray`テクスチャが
+  1枚も生成されないことを確認（修正前は1ライトマップにつき1枚生成されていた）。
+- `DirectionalLightmapBaker.cs`（約767行）は正当なオプトイン機能（方向性ライトマップベイク用）
+  だが、現在の参照シーンはNonDirectionalベイクを使っているため完全に不稼働。ムダとしては
+  扱っていない（コード量の把握用の備考のみ）。
+
+### 含まれないもの
+
+- `Assets/ResoniteSDK/Generated/`（テストシーン固有の生成物）は意図的に除外
+- `Assets/Editor/LightmapTestHarness.cs`等（アテナ駆動の実機テスト自動化ハーネス、
+  ヘッダーコメントに明記の通り「テスト専用・SDKフォークには含めない」）
+
+### 既知の未解決事項
+
+- ResoniteLink.dll側の未同期WebSocket切断（送信中に稀に発生、上流Issue報告候補。
+  `AssetConverter.cs`の60秒タイムアウトは検知のみで根治ではない）
+- `AudioEffectConverter.cs`は実機（Resonite内での実際の音声）で未検証
+- `LightTuning.WhiteBalanceShift`は光源の元色相に関わらず一律で白へブレンドするため、
+  シーン内に複数の異なる色の光源がある場合は色差が均等に薄まる（単一色系照明のシーンでの
+  運用を前提、複数色対応は未着手）
+- MetallicMapのアルファチャンネルがResonite実機でAlbedoの見え方に影響するか（ユーザー報告あり、
+  未確証）
+
+---
+
+## Folder structure / フォルダ構成
 
 ```
 Assets/ResoniteSDK/
@@ -331,7 +561,7 @@ Assets/ResoniteSDK/
 │       ├── MeshRendererConverter.cs          [official, modified] lightmap-variant swap + partial-send guard
 │       ├── SkinnedMeshRendererConverter.cs   [official, modified (3 lines)]
 │       ├── ReflectionProbeConverter.cs       [official, modified] Tonemap Compensation applied
-│       ├── ParticleSystemConverter.cs        [official, modified] assorted bug fixes (see item 9 above)
+│       ├── ParticleSystemConverter.cs        [official, modified] assorted bug fixes
 │       └── PostProcessingConverter.cs        ★new PPv2 GlobalVolume → PostProcessingSettings
 │
 ├── MaterialConverters/
@@ -348,36 +578,17 @@ Assets/ResoniteSDK/
 │       └── UnlitConverter.cs                 [official, modified] legacy particle shader support
 ```
 
-Legend: `★new` = file that doesn't exist in the official SDK. `[official, modified]` =
-an official file we edit (aiming for the smallest diff possible; files not yet
-externalized may still carry a larger one).
+Legend / 凡例: `★new` / `★新規` = file that doesn't exist in the official SDK / 公式SDKに
+存在しない新規ファイル. `[official, modified]` / `[公式・変更あり]` = an official file we
+edit (aiming for the smallest diff possible) / 公式ファイルを編集（できる限り最小差分を志向）.
 
-## Not included
+---
 
-- `Assets/ResoniteSDK/Generated/` (scene-specific generated output) is deliberately
-  excluded
-- `Assets/Editor/LightmapTestHarness.cs` and friends (the file-driven real-machine test
-  automation harness — its own header comment explicitly says "test-only, not part of the
-  SDK fork")
-
-## Known open issues
-
-- ResoniteLink.dll occasionally drops the WebSocket mid-send in an unsynchronized way (a
-  candidate for an upstream issue report; `AssetConverter.cs`'s 60-second timeout only
-  detects this, it doesn't fix the root cause)
-- `AudioEffectConverter.cs` has not been verified against real in-world audio in Resonite
-- `LightTuning.WhiteBalanceShift` blends every light toward white uniformly regardless of
-  its original hue, so a scene with multiple differently-colored lights would have those
-  color differences washed out evenly (this SDK's reference scene uses a single warm color
-  scheme, so multi-color support hasn't been built yet)
-- Whether the MetallicMap's alpha channel affects Albedo visibility on a real Resonite
-  client (user-reported, unconfirmed) is recorded as an open question in
-  `2026-08-08_rezo_con_baked_lightmap_metallic_compensation_values.md`
-
-## License
+## License / ライセンス
 
 [MIT](LICENSE). This project overlays
 [`Resonite.UnitySDK`](https://github.com/Yellow-Dog-Man/Resonite.UnitySDK) (Copyright (c)
-2026 Yellow Dog Man Studios), which is also MIT-licensed.
+2026 Yellow Dog Man Studios), which is also MIT-licensed. / 本プロジェクトは公式
+`Resonite.UnitySDK`に重ねるオーバーレイであり、重ねる対象も同じくMITライセンスです。
 
-Generated: 2026-08-08
+Generated / 生成日: 2026-08-08
