@@ -376,6 +376,8 @@ externalized may still carry a larger one).
 
 ## License
 
-[MIT](LICENSE) — the same license as the official `Resonite.UnitySDK` this overlays.
+[MIT](LICENSE). This project overlays
+[`Resonite.UnitySDK`](https://github.com/Yellow-Dog-Man/Resonite.UnitySDK) (Copyright (c)
+2026 Yellow Dog Man Studios), which is also MIT-licensed.
 
 Generated: 2026-08-08

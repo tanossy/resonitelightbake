@@ -339,7 +339,10 @@ Assets/ResoniteSDK/
 
 ## ライセンス
 
-[MIT](LICENSE) — 重ねる対象の公式`Resonite.UnitySDK`と同じライセンスです。
+[MIT](LICENSE)。本プロジェクトは
+[`Resonite.UnitySDK`](https://github.com/Yellow-Dog-Man/Resonite.UnitySDK)
+（Copyright (c) 2026 Yellow Dog Man Studios）に重ねるオーバーレイであり、重ねる対象も
+同じくMITライセンスです。
 
 生成日: 2026-08-08（最終更新: LightConverter/SceneConverter外だし・Camera/VRCWorld除外・
 明るさ調整2.5→1.8・加算フィル無駄排除・コメント英語化・英語版README追加を反映）
