@@ -15,6 +15,17 @@ License / ライセンス: [MIT](LICENSE)
 Target branch / 対象ブランチ: `feature/water-and-audio-presets`
 Fork point / フォーク元コミット: `5eea4b03` (right after PR #117 merged / PR #117マージ直後)
 
+### Quickstart / クイックスタート
+
+1. Get the official `Resonite.UnitySDK` working in your Unity project /
+   公式`Resonite.UnitySDK`をUnityプロジェクトで使えるようにする
+2. Install the `ResoniteLightbake` UnityPackage /
+   `ResoniteLightbake`のUnityPackageを入れる
+3. Launch Resonite and get ResoniteLink ready to connect /
+   Resoniteを起動し、ResoniteLinkが使えるように設定する
+4. Click **Bake & Send** in the UnitySDK panel (`Resonite SDK > Lightmap Pipeline`) /
+   UnitySDKのパネル（`Resonite SDK > Lightmap Pipeline`）で **Bake & Send** を押す
+
 ---
 
 ## English
@@ -214,6 +225,22 @@ comments for why full grading was tried and reverted).
     warning in `MeshRendererConverter.cs`; a Unity "fake null" crash fix and SH2 default-off
     in `SkyboxConverter.cs`; assorted fallback handling in `Texture2DConverter.cs`/
     `StandardConverter.cs`/`UnlitConverter.cs`.
+11. **Lightmap Pipeline panel** (new, `Assets/Editor/`) — `LightmapPipelineWindow.cs`
+    (`Resonite SDK > Lightmap Pipeline`) turns "pick a quality preset → bake → send" into
+    one button (`Bake & Send`), for either Bakery (if installed) or Unity's built-in
+    Progressive Lightmapper. Also exposes standalone `Bake`/`Convert Lights`/partial-send
+    buttons, a lighting-tuning section (ambient/shadow/sun knobs) for the Unity Standard
+    path, and an experimental "bake normal detail into lightmap" option. The actual bake/
+    send logic lives in `LightmapTestHarness.cs`, which the panel calls into (no duplicated
+    logic) and which can also be driven by an external process by writing a command string
+    to `Temp/lightmap_harness_cmd.txt` (see that file's header comment for the command
+    list) — this was originally built as an AI-agent automation hook, but works the same
+    way for any external script. `BakeryPresenceDefine.cs` auto-detects whether Bakery is
+    installed (`BAKERY_INCLUDED`) so the panel/harness compile and degrade gracefully either
+    way; `BakeryTempObjectSuppression.cs` excludes Bakery's own temp storage object from
+    scene sends; `PoiyomiBakeStandin.cs` temporarily swaps Poiyomi materials to a Standard
+    stand-in for the bake (Poiyomi never receives a baked lightmap otherwise) and restores
+    them afterward.
 
 ### Design principle: minimize the diff against official files
 
@@ -262,9 +289,8 @@ work, since fixed:
 
 - `Assets/ResoniteSDK/Generated/` (scene-specific generated output) is deliberately
   excluded
-- `Assets/Editor/LightmapTestHarness.cs` and friends (the file-driven real-machine test
-  automation harness — its own header comment explicitly says "test-only, not part of the
-  SDK fork")
+- `Assets/ResoniteSDK/AvatarSetup/` (an unrelated avatar-rigging setup wizard that happens
+  to live in the same local project) is a separate concern, not part of this overlay
 
 ### Known open issues
 
@@ -460,6 +486,20 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
     `StandardBaseConverter.cs`等の部分送信ガード、`MeshRendererConverter.cs`の混在時警告、
     `SkyboxConverter.cs`のfake-null対策・SH2デフォルト無効化、`Texture2DConverter.cs`/
     `StandardConverter.cs`/`UnlitConverter.cs`のフォールバック処理。
+11. **Lightmap Pipelineパネル**（新規、`Assets/Editor/`） — `LightmapPipelineWindow.cs`
+    （メニュー: `Resonite SDK > Lightmap Pipeline`）が「品質プリセット選択→ベイク→送信」を
+    `Bake & Send`ボタン1つに集約する。対象はBakery（導入されていれば）またはUnity標準
+    Progressive Lightmapperのどちらでも。単体の`Bake`/`Convert Lights`/部分送信ボタン、
+    Unity標準経路向けのライティング調整セクション（環境光/影/太陽の各つまみ）、実験的な
+    「法線を焼き込む」オプションも備える。実際のベイク・送信ロジックは`LightmapTestHarness.cs`
+    にあり、このパネルはそれを呼ぶだけ（ロジックの重複なし）。`Temp/lightmap_harness_cmd.txt`
+    にコマンド文字列を書き込むことで外部プロセスからも駆動できる（コマンド一覧は同ファイルの
+    ヘッダーコメント参照——元々はAI駆動の自動化フック用に作られたが、任意の外部スクリプトから
+    同様に使える）。`BakeryPresenceDefine.cs`がBakery導入有無を自動検出（`BAKERY_INCLUDED`）し
+    パネル/ハーネス双方が導入有無に関わらずコンパイル・動作する。`BakeryTempObjectSuppression.cs`
+    はBakery自身の一時ストレージオブジェクトをシーン送信から除外、`PoiyomiBakeStandin.cs`は
+    Poiyomiマテリアルをベイク中だけ一時的にStandard材へ差し替え（Poiyomiはベイクライトマップを
+    受け取れないため）、完了後に復元する。
 
 ### 設計方針: 公式ファイルへの変更を最小化
 
@@ -503,8 +543,8 @@ resonite.Color = new ColorX(LightTuning.ApplyColor(unity.color));
 ### 含まれないもの
 
 - `Assets/ResoniteSDK/Generated/`（テストシーン固有の生成物）は意図的に除外
-- `Assets/Editor/LightmapTestHarness.cs`等（アテナ駆動の実機テスト自動化ハーネス、
-  ヘッダーコメントに明記の通り「テスト専用・SDKフォークには含めない」）
+- `Assets/ResoniteSDK/AvatarSetup/`（同じローカルプロジェクトに同居しているだけの、
+  無関係なアバターセットアップウィザード）は別件として対象外
 
 ### 既知の未解決事項
 
@@ -576,6 +616,15 @@ Assets/ResoniteSDK/
 │   │   └── BakedLightmapStandardConverter.cs ★new baked-lightmap conversion (tunable values live here)
 │   └── Unlit/
 │       └── UnlitConverter.cs                 [official, modified] legacy particle shader support
+```
+
+```
+Assets/Editor/                                  ← Lightmap Pipeline panel (sibling of ResoniteSDK/, all new)
+├── LightmapPipelineWindow.cs                  ★new "pick preset → Bake & Send" one-button panel
+├── LightmapTestHarness.cs                     ★new actual bake/send logic (also file-command drivable)
+├── BakeryPresenceDefine.cs                    ★new auto-detects Bakery (BAKERY_INCLUDED)
+├── BakeryTempObjectSuppression.cs             ★new excludes Bakery's temp storage object from sends
+└── PoiyomiBakeStandin.cs                      ★new temporary Poiyomi → Standard swap for baking
 ```
 
 Legend / 凡例: `★new` / `★新規` = file that doesn't exist in the official SDK / 公式SDKに
