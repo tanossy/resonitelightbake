@@ -143,7 +143,7 @@ client. To change them, edit the field directly in code (there's no in-panel UI 
 
 | File | Field | Current value | Meaning |
 |---|---|---|---|
-| `LightTuning.cs` | `IntensityMultiplier` | 1.8 | Multiplier applied to every light's Unity `Light.intensity` |
+| `LightTuning.cs` | `IntensityCeiling` | 0.9 | Target intensity for the scene's single brightest light; every light is scaled by the ratio needed to put the brightest one exactly here (self-normalizing per scene, not a fixed multiplier) |
 | `LightTuning.cs` | `WhiteBalanceShift` | 0.7 | Blends light color toward white at send time (0 = original color, 1 = pure white) |
 | `LightmapDecoder.cs` | `RangeScale` | 1.1 | Pre-decode gain applied to baked lightmap data |
 | `LightmapDecoder.cs` | `ColorSaturationCompensation` | 0.6 | Saturation reduction applied to the baked lightmap data itself (0–1) |
@@ -302,6 +302,10 @@ work, since fixed:
   its original hue, so a scene with multiple differently-colored lights would have those
   color differences washed out evenly (this SDK's reference scene uses a single warm color
   scheme, so multi-color support hasn't been built yet)
+- `LightTuning.IntensityCeiling`'s per-scene normalization only bounds the single brightest
+  light in the scene, not the cumulative brightness of many lights summed together — a
+  scene with dozens of moderate-intensity fill lights, each individually under the ceiling,
+  can still add up to an overexposed result
 - Whether the MetallicMap's alpha channel affects Albedo visibility on a real Resonite
   client (user-reported, unconfirmed) is an open question
 
@@ -409,7 +413,7 @@ Unity上での見た目とResonite実機での見た目にギャップがあり�
 
 | ファイル | フィールド | 現在値 | 意味 |
 |---|---|---|---|
-| `LightTuning.cs` | `IntensityMultiplier` | 1.8 | 全ライト共通、Unity側`Light.intensity`への掛け率 |
+| `LightTuning.cs` | `IntensityCeiling` | 0.9 | シーン内で最も明るいライトがこの値になるよう、全ライトへ同じ比率で倍率を逆算（固定倍率ではなくシーンごとに自動正規化） |
 | `LightTuning.cs` | `WhiteBalanceShift` | 0.7 | 光源色を送信時だけ白側へブレンド（0=元の色, 1=純白）|
 | `LightmapDecoder.cs` | `RangeScale` | 1.1 | ベイクデータのデコード前ゲイン |
 | `LightmapDecoder.cs` | `ColorSaturationCompensation` | 0.6 | ベイクデータ自体の彩度低減（0〜1）|
@@ -554,6 +558,9 @@ resonite.Color = new ColorX(LightTuning.ApplyColor(unity.color));
 - `LightTuning.WhiteBalanceShift`は光源の元色相に関わらず一律で白へブレンドするため、
   シーン内に複数の異なる色の光源がある場合は色差が均等に薄まる（単一色系照明のシーンでの
   運用を前提、複数色対応は未着手）
+- `LightTuning.IntensityCeiling`のシーンごと正規化は、シーン内で最も明るい単体ライトしか
+  基準にしていないため、中程度の明るさのライトが大量にある場合（個々は上限内でも合計で
+  過露出になる）には対応できない
 - MetallicMapのアルファチャンネルがResonite実機でAlbedoの見え方に影響するか（ユーザー報告あり、
   未確証）
 
