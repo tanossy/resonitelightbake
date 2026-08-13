@@ -59,6 +59,14 @@ public class ResoniteLinkWindow : EditorWindow
     [SerializeField]
     public bool ToneMapCompensation = true;
 
+    // Mirrors LightTuning.IntensityCeiling - kept as the window's own serialized field (same
+    // pattern as ToneMapCompensation above) rather than reading/writing LightTuning.
+    // IntensityCeiling directly from a plain static, so the chosen value survives domain
+    // reloads instead of resetting to LightTuning's hardcoded default every time scripts
+    // recompile.
+    [SerializeField]
+    public float LightIntensityCeiling = 0.9f;
+
     public string UniqueSessionId => _uniqueSessionId;
 
     public LinkInterface Link => _linkInterface;
@@ -162,6 +170,14 @@ public class ResoniteLinkWindow : EditorWindow
         // independent from the core SDK).
         ToneMapCompensation = GUILayout.Toggle(ToneMapCompensation, "Send Tonemap Compensation (experimental)");
         ToneMapCompensationState.Enabled = ToneMapCompensation;
+
+        // Target intensity for the scene's single brightest light at send time (see
+        // LightTuning.cs) - exposed here instead of requiring a code edit, since the right
+        // ceiling value can vary by scene/taste.
+        LightIntensityCeiling = EditorGUILayout.Slider(
+            new GUIContent("Light Intensity Ceiling", "Target intensity for the scene's single brightest light at send time; every light is scaled by the same ratio needed to put the brightest one exactly here."),
+            LightIntensityCeiling, 0.1f, 3f);
+        LightTuning.IntensityCeiling = LightIntensityCeiling;
 
         if (GUILayout.Button("Send Current Scene"))
             SendCurrentScene();

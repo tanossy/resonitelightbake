@@ -85,6 +85,9 @@ don't assume it's still current just because it says so here — check for yours
    - **Send Tonemap Compensation (experimental)** — whether to apply the tonemap
      approximation to material colors / Reflection Probe intensity (see "Tonemap
      Compensation" below; default ON)
+   - **Light Intensity Ceiling** (slider, default 0.9) — target intensity for the scene's
+     single brightest light at send time; every light is scaled by the same ratio needed to
+     put the brightest one exactly here (see "Send-time brightness/color tuning" below)
 4. Click `Send Current Scene`. A single `Unity Import` slot is created directly under World
    Root (an existing one is deleted and rebuilt, so re-sending never produces duplicates),
    and everything is placed under it
@@ -358,11 +361,14 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
 
 1. `Resonite SDK > Open Resonite SDK Manager` を開く
 2. AutoDiscovery（推奨）または Manual（ポート指定）で接続
-3. 必要に応じて3つのトグルを確認:
+3. 必要に応じて3つのトグル＋スライダーを確認:
    - **Convert Skybox** — スカイボックス（Material/ReflectionProbe）も一緒に送るか
    - **Force Refresh Generated Lightmaps** — 生成済みライトマップ差分ファイルを毎回強制再生成するか
    - **Send Tonemap Compensation (experimental)** — マテリアル色/Reflection Probe強度への
      トーンマップ近似補正を掛けるか（下記「Tonemap Compensation」参照。デフォルトON）
+   - **Light Intensity Ceiling**（スライダー、既定0.9） — シーン内で最も明るいライトが
+     送信時にこの値になるよう、全ライトへ同じ比率で倍率を逆算（下記「送信時の明るさ・
+     色調整」参照）
 4. `Send Current Scene` を押す。World Root直下に単一の `Unity Import` スロットが作られ
    （既存があれば削除してから作り直す＝再送信しても重複しない）、その下に全内容が入る
 5. 送信中は `AssetConverter.cs` 側に60秒のタイムアウトが設定されている。
