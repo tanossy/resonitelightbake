@@ -78,13 +78,12 @@ don't assume it's still current just because it says so here — check for yours
 
 1. Open `Resonite SDK > Open Resonite SDK Manager`
 2. Connect via AutoDiscovery (recommended) or Manual (specify a port)
-3. Check the three toggles as needed:
-   - **Convert Skybox** — whether to also send the skybox (Material/ReflectionProbe)
-   - **Force Refresh Generated Lightmaps** — whether to force-regenerate the generated
-     lightmap-variant files every time
-   - **Send Tonemap Compensation (experimental)** — whether to apply the tonemap
-     approximation to material colors / Reflection Probe intensity (see "Tonemap
-     Compensation" below; default ON)
+3. Check the toggle as needed:
+   - **Convert Skybox** — whether to also send the skybox (Material/ReflectionProbe); the
+     only one of these that's actually part of vanilla Resonite.UnitySDK
+   - Force Refresh Generated Lightmaps and Send Tonemap Compensation now live in the
+     **Lightmap Pipeline** panel's "Send-Time Options" section instead (`Resonite SDK >
+     Lightmap Pipeline`; applies to either baker — see "Tonemap Compensation" below)
 4. Click `Send Current Scene`. A single `Unity Import` slot is created directly under World
    Root (an existing one is deleted and rebuilt, so re-sending never produces duplicates),
    and everything is placed under it
@@ -165,7 +164,8 @@ Reproduces Unity PPv2's Neutral Tonemapper-style color compression and applies i
 material colors — AlbedoColor/EmissiveColor, saturation only — and to Reflection Probe
 intensity). Resonite's renderer (Renderite) does no camera-side post-process tonemapping,
 so the same HDR values look glarier/blown-out in Resonite than they did tonemapped in
-Unity. Toggle it from the panel's "Send Tonemap Compensation" checkbox (default ON).
+Unity. Toggle it from the **Lightmap Pipeline** panel's "Send Tonemap Compensation" checkbox
+in the "Send-Time Options" section (default ON).
 
 **Currently only the Reflection Probe half has a visible effect.** The material-color half
 (`ColorGradingApproximation.Apply`) applies saturation only, and saturation adjustment is a
@@ -232,9 +232,12 @@ comments for why full grading was tried and reverted).
     one button (`Bake & Send`), for either Bakery (if installed) or Unity's built-in
     Progressive Lightmapper. Also exposes standalone `Bake`/`Convert Lights`/partial-send
     buttons, a lighting-tuning section (ambient/shadow/sun knobs) for the Unity Standard
-    path, an experimental "bake normal detail into lightmap" option, and a "Send-Time
-    Light Tuning" section (`LightTuning.IntensityCeiling`/`WhiteBalanceShift` sliders,
-    shown regardless of baker since these apply at conversion/send time, not at bake time).
+    path, an experimental "bake normal detail into lightmap" option, a "Send-Time Options"
+    section (Force Refresh Generated Lightmaps / Send Tonemap Compensation toggles, moved
+    here from the main SDK panel since they're overlay additions, not vanilla
+    Resonite.UnitySDK), and a "Send-Time Light Tuning" section
+    (`LightTuning.IntensityCeiling`/`WhiteBalanceShift` sliders) — both of the latter two
+    shown regardless of baker since they apply at conversion/send time, not at bake time.
     The actual bake/
     send logic lives in `LightmapTestHarness.cs`, which the panel calls into (no duplicated
     logic) and which can also be driven by an external process by writing a command string
@@ -363,11 +366,12 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
 
 1. `Resonite SDK > Open Resonite SDK Manager` を開く
 2. AutoDiscovery（推奨）または Manual（ポート指定）で接続
-3. 必要に応じて3つのトグルを確認:
+3. 必要に応じてトグルを確認:
    - **Convert Skybox** — スカイボックス（Material/ReflectionProbe）も一緒に送るか
-   - **Force Refresh Generated Lightmaps** — 生成済みライトマップ差分ファイルを毎回強制再生成するか
-   - **Send Tonemap Compensation (experimental)** — マテリアル色/Reflection Probe強度への
-     トーンマップ近似補正を掛けるか（下記「Tonemap Compensation」参照。デフォルトON）
+     （このパネルの項目のうち、これだけが本家Resonite.UnitySDK由来のvanilla機能）
+   - Force Refresh Generated LightmapsとSend Tonemap Compensationは**Lightmap Pipeline**
+     パネルの「送信時オプション」セクションに移設済み（`Resonite SDK > Lightmap Pipeline`。
+     どちらのBakerでも使える。下記「Tonemap Compensation」参照）
 4. `Send Current Scene` を押す。World Root直下に単一の `Unity Import` スロットが作られ
    （既存があれば削除してから作り直す＝再送信しても重複しない）、その下に全内容が入る
 5. 送信中は `AssetConverter.cs` 側に60秒のタイムアウトが設定されている。
@@ -439,8 +443,8 @@ Unity上での見た目とResonite実機での見た目にギャップがあり�
 UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリアル色
 （AlbedoColor/EmissiveColor、彩度のみ）とReflection Probe強度に反映する。Resonite
 (Renderite)は主カメラのポスト処理トーンマッピングを持たないため、同じHDR値でもUnity側より
-反射・発光がぎらつく問題への対策。パネルの「Send Tonemap Compensation」トグルでON/OFF可能
-（デフォルトON）。
+反射・発光がぎらつく問題への対策。**Lightmap Pipeline**パネルの「送信時オプション」内
+「Send Tonemap Compensation」トグルでON/OFF可能（デフォルトON）。
 
 **現状、実際に見た目へ効いているのはReflection Probe側のみ。** マテリアル色側
 （`ColorGradingApproximation.Apply`）は彩度のみを適用する実装になっているが、彩度調整は
@@ -503,9 +507,12 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
     `Bake & Send`ボタン1つに集約する。対象はBakery（導入されていれば）またはUnity標準
     Progressive Lightmapperのどちらでも。単体の`Bake`/`Convert Lights`/部分送信ボタン、
     Unity標準経路向けのライティング調整セクション（環境光/影/太陽の各つまみ）、実験的な
-    「法線を焼き込む」オプション、「送信時ライト調整」セクション（`LightTuning.IntensityCeiling`/
-    `WhiteBalanceShift`のスライダー。ベイク時ではなく変換/送信時に効く値のためBaker非依存で
-    常時表示）も備える。実際のベイク・送信ロジックは`LightmapTestHarness.cs`
+    「法線を焼き込む」オプション、「送信時オプション」セクション（Force Refresh Generated
+    Lightmaps / Send Tonemap Compensationトグル。本家Resonite.UnitySDK非搭載のオーバーレイ
+    独自機能のためメインSDKパネルからこちらへ移設）、「送信時ライト調整」セクション
+    （`LightTuning.IntensityCeiling`/`WhiteBalanceShift`のスライダー）も備える。後者2つは
+    ベイク時ではなく変換/送信時に効く値のためBaker非依存で常時表示。実際のベイク・送信
+    ロジックは`LightmapTestHarness.cs`
     にあり、このパネルはそれを呼ぶだけ（ロジックの重複なし）。`Temp/lightmap_harness_cmd.txt`
     にコマンド文字列を書き込むことで外部プロセスからも駆動できる（コマンド一覧は同ファイルの
     ヘッダーコメント参照——元々はAI駆動の自動化フック用に作られたが、任意の外部スクリプトから

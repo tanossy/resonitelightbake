@@ -51,13 +51,7 @@ public class ResoniteLinkWindow : EditorWindow
     public bool ConvertSkybox = true;
 
     [SerializeField]
-    public bool ForceRefreshGeneratedLightmaps = true;
-
-    [SerializeField]
     public bool LogMessageJSON;
-
-    [SerializeField]
-    public bool ToneMapCompensation = true;
 
     public string UniqueSessionId => _uniqueSessionId;
 
@@ -153,15 +147,14 @@ public class ResoniteLinkWindow : EditorWindow
         GUI.enabled = State == ConnectionState.Connected && !_converter.IsRealtimeModeActive;
 
         ConvertSkybox = GUILayout.Toggle(ConvertSkybox, "Convert Skybox");
-        ForceRefreshGeneratedLightmaps = GUILayout.Toggle(ForceRefreshGeneratedLightmaps, "Force Refresh Generated Lightmaps");
 
-        // This single toggle controls both the tonemap approximation applied to material colors
-        // (ColorGradingApproximation) and the Reflection Probe intensity falloff
-        // (ReflectionProbeConverter) together. The backing state is a static bool in
-        // Assets/ResoniteSDK/ToneMapCompensation/ToneMapCompensationState.cs (a folder kept
-        // independent from the core SDK).
-        ToneMapCompensation = GUILayout.Toggle(ToneMapCompensation, "Send Tonemap Compensation (experimental)");
-        ToneMapCompensationState.Enabled = ToneMapCompensation;
+        // 2026-08-18: "Force Refresh Generated Lightmaps" and "Send Tonemap Compensation
+        // (experimental)" (both overlay additions, not part of vanilla Resonite.UnitySDK — unlike
+        // Convert Skybox above, which is upstream) moved to the Lightmap Pipeline panel's
+        // "Send-Time Options" section (see LightmapPipelineWindow.cs's DrawSendTimeOptionsSection())
+        // per Tanossy's feedback to keep this official-looking panel limited to what's actually
+        // original. Their backing state (ConversionPassState.ForceRefreshGeneratedLightmaps /
+        // ToneMapCompensationState.Enabled) is unchanged, just no longer written from here.
 
         if (GUILayout.Button("Send Current Scene"))
             SendCurrentScene();
@@ -181,12 +174,13 @@ public class ResoniteLinkWindow : EditorWindow
 
         GUI.enabled = true;
 
-        // The "Meshes/Materials/Lightmaps Only" sends, "Retry Missing Asset URLs", and the whole
-        // DEBUGGING section (Cleanup tools, Reset conversion state, Log Messages JSON) live in
-        // ResoniteSDKDebugWindow.cs (menu: Resonite SDK/Open Debug Tools) rather than in this
-        // official-looking panel. The methods they call are public so they can be referenced
-        // directly from there. Only the always-used controls (Connect, Send Current Scene,
-        // Realtime Mode) remain here.
+        // 2026-08-08 (per Tanossy's feedback: "keep all the custom functionality in its own
+        // panel"): The "Meshes/Materials/Lightmaps Only" sends, "Retry Missing Asset URLs", and the
+        // whole DEBUGGING section (Cleanup tools, Reset conversion state, Log Messages JSON) have
+        // been moved out of this official-looking panel and into ResoniteSDKDebugWindow.cs
+        // (menu: Resonite SDK/Open Debug Tools). The methods they call have been changed to public
+        // so they can be referenced directly from there. Only the always-used controls
+        // (Connect, Send Current Scene, Realtime Mode) remain here.
     }
 
     // Force an update, which should refresh the UI
@@ -352,26 +346,35 @@ public class ResoniteLinkWindow : EditorWindow
 
     public void ResetConversionState()
     {
-        // Recreating _converter alone is not sufficient: converters already living under the
-        // __UnityAssets / __UnitySkybox roots (Texture2DConverter/MeshConverter/AudioClipConverter
-        // etc.) persist in the scene, and AssetConversionManager's constructor scans and reuses the
-        // contents of a root with the same name if one already exists. Because these converters
-        // still hold IDs issued by the previous session, a new session (whether UniqueSessionId
-        // changed, or the connection dropped and reconnected) would see them as pointing to
-        // components that no longer exist, causing failures like "Component with ID '...' not
-        // found", and could leave converters duplicated across sessions. CleanupConverters() and
-        // CleanupAssetConversionRoots() destroy the full set of converter components (both the
-        // scene hierarchy side and the asset side) before _converter is recreated, so the next
-        // conversion starts from a clean state.
+        // 2026-07-14 bug fix (per Tanossy's feedback): Previously this method only recreated
+        // _converter, while the converters already living under the __UnityAssets / __UnitySkybox
+        // roots in the Unity scene (Texture2DConverter/MeshConverter/AudioClipConverter etc. -
+        // AssetConversionManager's constructor is designed to "scan and reuse the contents if a
+        // root with the same name already exists") were left surviving as-is.
         //
-        // CleanupReosniteComponents() is deliberately not called here: every ResoniteComponent on
-        // the scene hierarchy side is already destroyed via
-        // ResoniteComponentConverter.OnDestroy() -> Cleanup() -> DestroyImmediate(Binding), which
-        // CleanupConverters()'s DestroyImmediate(converter) triggers, and the asset-side
-        // ResoniteComponent(Provider) is destroyed as a child when CleanupAssetConversionRoots()
-        // removes __UnityAssets/__UnitySkybox entirely. Calling CleanupReosniteComponents()
-        // afterwards would re-collect and try to destroy the same, already-destroyed components,
-        // producing "Destroying object multiple times" warnings.
+        // Because these converters still held onto the IDs issued by the "previous session", a new
+        // session (whether UniqueSessionId changed, or the connection broke and reconnected) would
+        // see them as pointing to components that no longer exist, causing update failures like
+        // "Component with ID '...' not found". Converters on the scene hierarchy side could also
+        // end up duplicated across sessions for the same reason.
+        //
+        // Fix: when recognizing a new session and resetting, don't just recreate the controller
+        // (_converter) - also destroy the full existing set of converter components (both on the
+        // scene hierarchy side and the asset side), so the next conversion starts from a
+        // completely clean state.
+        //
+        // 2026-07-15 (fixed after observing frequent "Destroying object multiple times" warnings
+        // on real hardware): CleanupReosniteComponents() was originally included here, but it
+        // turned out to be entirely redundant. Every ResoniteComponent on the scene hierarchy side
+        // is already destroyed via the chain ResoniteComponentConverter.OnDestroy() -> Cleanup() ->
+        // DestroyImmediate(Binding) (CleanupConverters()'s DestroyImmediate(converter) triggers
+        // this chain every time). The ResoniteComponent(Provider) on the asset side is also swept
+        // away as a child at the point where CleanupAssetConversionRoots() destroys
+        // __UnityAssets/__UnitySkybox themselves entirely. CleanupReosniteComponents() was
+        // independently re-collecting the same components via
+        // GetComponentsInChildren<ResoniteComponent>() and trying to DestroyImmediate them again
+        // even though they were already destroyed (via the chain / parent destruction), which is
+        // what produced the double-destroy warning.
         CleanupConverters();
         CleanupAssetConversionRoots();
 

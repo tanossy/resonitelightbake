@@ -19,7 +19,7 @@ public class SceneConverter : IConversionContext
 
     public bool LogMessageJSON => _window.LogMessageJSON;
     public bool ConvertSkybox => _window.ConvertSkybox;
-    public bool ForceRefreshGeneratedLightmaps => _window.ForceRefreshGeneratedLightmaps;
+    public bool ForceRefreshGeneratedLightmaps => ConversionPassState.ForceRefreshGeneratedLightmaps;
     public ResoniteSdkConversionPass ActiveConversionPass => ConversionPassState.ActivePass;
 
     // TODO!!! Move this to a dedicated connection manager so the Window is only managing the UI?
@@ -36,10 +36,10 @@ public class SceneConverter : IConversionContext
     [SerializeField]
     HashSet<Transform> _existingSlots = new HashSet<Transform>();
 
-    // Single intermediate parent slot. All Unity root objects are sent underneath this slot
-    // rather than directly under the world Root (since this is a synthetic slot with no real
-    // Unity Transform behind it, it can't be tracked via _transformMap, so it's held in its own
-    // dedicated field instead).
+    // 2026-07-14: Single intermediate parent slot. All Unity root objects are sent underneath
+    // this slot rather than directly under the world Root (since this is a synthetic slot with
+    // no real Unity Transform behind it, it can't be tracked via _transformMap, so it's held in
+    // its own dedicated field instead).
     [SerializeField]
     ResoniteLink.Slot _importRootSlot;
 
@@ -65,8 +65,9 @@ public class SceneConverter : IConversionContext
         if (o is FrooxEngine.Slot)
             throw new ArgumentException($"Cannot allocate ID for a Slot object! This needs to be handled through transforms");
 
-        // ID generation source is GlobalIdAllocator (Editor/GlobalIdAllocator.cs). See that
-        // file's comment for the rationale and the bug it fixes.
+        // 2026-08-08: ID generation source switched to GlobalIdAllocator (externalized into
+        // Editor/GlobalIdAllocator.cs). See that file's comment for the rationale and the
+        // real-world bug this fixes.
         return $"Unity_{UniqueSessionId}_{o?.GetType().Name}_{GlobalIdAllocator.Next():X}";
     }
 
@@ -275,7 +276,8 @@ public class SceneConverter : IConversionContext
         if (pass == ResoniteSdkConversionPass.Full && ConvertSkybox)
             _skybox.EnsureRoot();
 
-        // Exclusion logic lives in SceneRootFilter (Editor/SceneRootFilter.cs).
+        // 2026-08-08: Exclusion logic moved to SceneRootFilter (externalized into
+        // Editor/SceneRootFilter.cs).
         var roots = SceneManager.GetActiveScene().GetRootGameObjects()
             .Where(g => !SceneRootFilter.ShouldExclude(g));
 
@@ -311,10 +313,10 @@ public class SceneConverter : IConversionContext
             {
                 var messages = new List<DataModelOperation>();
 
-                // This path calls Convert/ConvertHierarchy directly instead of going through
-                // Convert(IEnumerable<Transform> roots), so if _importRootSlot is left
-                // uninitialized, GatherTransformData's `_importRootSlot.ID` reference will NPE.
-                // This call is idempotent, so it's safe to invoke every time.
+                // 2026-07-14: This path calls Convert/ConvertHierarchy directly instead of
+                // going through Convert(IEnumerable<Transform> roots), so if _importRootSlot is
+                // left uninitialized, GatherTransformData's `_importRootSlot.ID` reference will
+                // NPE. This call is idempotent, so it's safe to invoke every time.
                 EnsureImportRootSlot(messages);
 
                 Convert(_assetConverter.AssetsRoot, messages);
@@ -349,14 +351,15 @@ public class SceneConverter : IConversionContext
 
             var messages = new List<DataModelOperation>();
 
-            // Each of Unity's root GameObjects (Lighting/Structure/__UnityAssets/__UnitySkybox,
-            // etc. - each an independent Unity scene root) used to be sent directly as a child of
-            // the Resonite world's Root (via GatherTransformData's `transform.parent == null ->
-            // TargetID = "Root"`). That caused multiple disconnected clusters of converted content
-            // to pile up directly under the world Root, making it hard to tell which cluster was
-            // our own output and clean it up, especially once duplicated across sessions. A single
-            // intermediate parent slot (ImportRootSlotName) groups all Unity roots underneath it,
-            // so cleanup becomes as simple as deleting this one named slot.
+            // 2026-07-14 bug fix (per Tanossy's feedback): previously, each of Unity's root
+            // GameObjects (Lighting/Structure/__UnityAssets/__UnitySkybox, etc. - each an
+            // independent Unity scene root) was sent directly as a child of the Resonite world's
+            // Root (via GatherTransformData's `transform.parent == null -> TargetID = "Root"`).
+            // This caused multiple disconnected clusters of converted content to pile up directly
+            // under the world Root, and every time they got duplicated across sessions it became
+            // hard to tell which cluster was our own output and clean it up. By introducing a
+            // single intermediate parent slot (ImportRootSlotName) and grouping all Unity roots
+            // underneath it, cleanup becomes as simple as deleting this one named slot.
             EnsureImportRootSlot(messages);
 
             foreach (var root in roots)
@@ -590,8 +593,8 @@ public class SceneConverter : IConversionContext
     {
         AddUpdateSlotData message;
 
-        // Every entry point (the regular Convert path, RetryMissingAssetURLs, and realtime
-        // sync's TransformUpdated) passes through here, so we must always guarantee
+        // 2026-07-14: every entry point (the regular Convert path, RetryMissingAssetURLs, and
+        // realtime sync's TransformUpdated) passes through here, so we must always guarantee
         // _importRootSlot exists right before handling a top-level Unity root. EnsureImportRootSlot
         // is idempotent, so it's harmless even if another caller has already invoked it.
         if (transform.parent == null)
@@ -621,25 +624,29 @@ public class SceneConverter : IConversionContext
     // SceneConverter instance runs a conversion, updating it on subsequent calls within the same
     // session), queues its Add/UpdateSlot message, and returns its ID so top-level Unity
     // transforms can target it as their parent instead of the world's literal "Root".
-    // See the comment in Convert(IEnumerable<Transform>) for why this exists.
+    // See the 2026-07-14 comment in Convert(IEnumerable<Transform>) for why this exists.
     string EnsureImportRootSlot(List<DataModelOperation> messages)
     {
         if (_importRootSlot == null)
         {
-            // Without this lookup, a brand-new ID would be allocated and an AddSlot sent every
-            // time this SceneConverter instance is recreated, so every reconnect (i.e. every time
-            // the session ID changed) would pile up an entirely separate "Unity Import" tree
-            // directly under World Root in parallel with the previous one, rather than reusing it.
+            // 2026-08-08 (per Tanossy's feedback: "shouldn't this have overwritten the old one?"):
+            // previously, this code unconditionally issued a brand-new ID (AllocateId) and sent
+            // AddSlot, so every reconnect (i.e. every time the session ID changed) piled up an
+            // entirely separate "Unity Import" tree directly under World Root in parallel (the
+            // Update-side branch was only designed to kick in on the 2nd+ call within the same
+            // session).
             //
             // A true diff-based update (matching each existing child slot by ID and reusing it)
             // would require a much bigger redesign, since this SceneConverter instance doesn't
-            // hold state across sessions by design. Instead, on the first send of a new session we
-            // query once whether a slot with the same name ("Unity Import") already exists
-            // directly under World Root and, if found, delete it entirely before creating a fresh
-            // one. This isn't a true "diff-based update" but rather "clean up, then rebuild" - the
-            // end result is that there is always exactly one tree, which achieves the expected
-            // overwrite behavior. The lookup itself lives in ImportRootSlotHelper
-            // (Editor/ImportRootSlotHelper.cs).
+            // hold state across sessions by design. Instead we take a simpler and more reliable
+            // approach here: on the first send of a new session, query once whether a slot with
+            // the same name ("Unity Import") already exists directly under World Root, and if
+            // found, delete it entirely before creating a fresh one. This isn't a true
+            // "diff-based update" but rather "clean up, then rebuild" - but the end result is
+            // that there is always exactly one tree, which achieves the "overwrite" effect the
+            // user expects.
+            // 2026-08-08: the lookup logic was moved to ImportRootSlotHelper (externalized into
+            // Editor/ImportRootSlotHelper.cs).
             var staleRootId = ImportRootSlotHelper.TryFindExistingId(Link, ImportRootSlotName);
 
             if (staleRootId != null)
@@ -716,9 +723,9 @@ public class SceneConverter : IConversionContext
 
     void GatherTransformData(Transform transform, ResoniteLink.Slot data)
     {
-        // Top-level Unity roots parent under the single "Unity Import" wrapper slot (see
-        // EnsureImportRootSlot) instead of the world's literal "Root", so all of our converted
-        // content lives under one well-known, easy-to-clean-up container.
+        // 2026-07-14: top-level Unity roots now parent under the single "Unity Import" wrapper
+        // slot (see EnsureImportRootSlot) instead of the world's literal "Root", so all of our
+        // converted content lives under one well-known, easy-to-clean-up container.
         if (transform.parent == null)
             data.Parent.TargetID = _importRootSlot.ID;
         else
