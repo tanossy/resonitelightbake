@@ -85,9 +85,6 @@ don't assume it's still current just because it says so here — check for yours
    - **Send Tonemap Compensation (experimental)** — whether to apply the tonemap
      approximation to material colors / Reflection Probe intensity (see "Tonemap
      Compensation" below; default ON)
-   - **Light Intensity Ceiling** (slider, default 0.9) — target intensity for the scene's
-     single brightest light at send time; every light is scaled by the same ratio needed to
-     put the brightest one exactly here (see "Send-time brightness/color tuning" below)
 4. Click `Send Current Scene`. A single `Unity Import` slot is created directly under World
    Root (an existing one is deleted and rebuilt, so re-sending never produces duplicates),
    and everything is placed under it
@@ -142,7 +139,9 @@ Lightmapper baked lightmaps in Resonite. Operational notes:
 
 There's a real gap between how a scene looks in the Unity Editor and how it looks on a
 live Resonite client. The following static values were tuned iteratively against a running
-client. To change them, edit the field directly in code (there's no in-panel UI for this):
+client. `IntensityCeiling`/`WhiteBalanceShift` have sliders in the **Lightmap Pipeline**
+panel's "Send-Time Light Tuning" section (`Resonite SDK > Lightmap Pipeline`, applies to
+either baker — see that panel's own section below); the rest still require a code edit:
 
 | File | Field | Current value | Meaning |
 |---|---|---|---|
@@ -233,7 +232,10 @@ comments for why full grading was tried and reverted).
     one button (`Bake & Send`), for either Bakery (if installed) or Unity's built-in
     Progressive Lightmapper. Also exposes standalone `Bake`/`Convert Lights`/partial-send
     buttons, a lighting-tuning section (ambient/shadow/sun knobs) for the Unity Standard
-    path, and an experimental "bake normal detail into lightmap" option. The actual bake/
+    path, an experimental "bake normal detail into lightmap" option, and a "Send-Time
+    Light Tuning" section (`LightTuning.IntensityCeiling`/`WhiteBalanceShift` sliders,
+    shown regardless of baker since these apply at conversion/send time, not at bake time).
+    The actual bake/
     send logic lives in `LightmapTestHarness.cs`, which the panel calls into (no duplicated
     logic) and which can also be driven by an external process by writing a command string
     to `Temp/lightmap_harness_cmd.txt` (see that file's header comment for the command
@@ -361,14 +363,11 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
 
 1. `Resonite SDK > Open Resonite SDK Manager` を開く
 2. AutoDiscovery（推奨）または Manual（ポート指定）で接続
-3. 必要に応じて3つのトグル＋スライダーを確認:
+3. 必要に応じて3つのトグルを確認:
    - **Convert Skybox** — スカイボックス（Material/ReflectionProbe）も一緒に送るか
    - **Force Refresh Generated Lightmaps** — 生成済みライトマップ差分ファイルを毎回強制再生成するか
    - **Send Tonemap Compensation (experimental)** — マテリアル色/Reflection Probe強度への
      トーンマップ近似補正を掛けるか（下記「Tonemap Compensation」参照。デフォルトON）
-   - **Light Intensity Ceiling**（スライダー、既定0.9） — シーン内で最も明るいライトが
-     送信時にこの値になるよう、全ライトへ同じ比率で倍率を逆算（下記「送信時の明るさ・
-     色調整」参照）
 4. `Send Current Scene` を押す。World Root直下に単一の `Unity Import` スロットが作られ
    （既存があれば削除してから作り直す＝再送信しても重複しない）、その下に全内容が入る
 5. 送信中は `AssetConverter.cs` 側に60秒のタイムアウトが設定されている。
@@ -415,7 +414,10 @@ Resonite側でも近い見た目に近似するパイプライン。運用の要
 #### 送信時の明るさ・色調整（実機チューニング値）
 
 Unity上での見た目とResonite実機での見た目にギャップがあり、以下のstatic値を実機検証しながら
-調整している。値を変えたい場合はコード内の該当フィールドを直接編集する（UI化はしていない）:
+調整している。`IntensityCeiling`/`WhiteBalanceShift` は **Lightmap Pipeline** パネルの
+「送信時ライト調整」セクション（`Resonite SDK > Lightmap Pipeline`。どちらのBakerでも使える。
+下記のパネル説明も参照）にスライダーがある。残りは値を変えたい場合コード内の該当フィールドを
+直接編集する:
 
 | ファイル | フィールド | 現在値 | 意味 |
 |---|---|---|---|
@@ -501,7 +503,9 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
     `Bake & Send`ボタン1つに集約する。対象はBakery（導入されていれば）またはUnity標準
     Progressive Lightmapperのどちらでも。単体の`Bake`/`Convert Lights`/部分送信ボタン、
     Unity標準経路向けのライティング調整セクション（環境光/影/太陽の各つまみ）、実験的な
-    「法線を焼き込む」オプションも備える。実際のベイク・送信ロジックは`LightmapTestHarness.cs`
+    「法線を焼き込む」オプション、「送信時ライト調整」セクション（`LightTuning.IntensityCeiling`/
+    `WhiteBalanceShift`のスライダー。ベイク時ではなく変換/送信時に効く値のためBaker非依存で
+    常時表示）も備える。実際のベイク・送信ロジックは`LightmapTestHarness.cs`
     にあり、このパネルはそれを呼ぶだけ（ロジックの重複なし）。`Temp/lightmap_harness_cmd.txt`
     にコマンド文字列を書き込むことで外部プロセスからも駆動できる（コマンド一覧は同ファイルの
     ヘッダーコメント参照——元々はAI駆動の自動化フック用に作られたが、任意の外部スクリプトから
