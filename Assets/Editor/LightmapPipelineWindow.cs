@@ -27,7 +27,7 @@
 //                          ボックス1個（下記表）
 //   送信時オプション   -> どちらのBakerでも常時表示。Force Refresh Generated Lightmaps /
 //                          Send Tonemap Compensation（旧・Resonite SDKパネルにあった非vanilla
-//                          トグル2個、2026-08-18移設）。DrawSendTimeOptionsSection()参照。
+//                          トグル2個を移設）。DrawSendTimeOptionsSection()参照。
 //   送信時ライト調整   -> どちらのBakerでも常時表示（ResoniteSDK/LightTuning.csの
 //                          IntensityCeiling/WhiteBalanceShiftを直接編集。ベイク結果自体では
 //                          なく変換/送信時にのみ効く値のためBaker非依存）。
@@ -295,12 +295,10 @@ public class LightmapPipelineWindow : EditorWindow
 
     // --- Send-Time Options section state --------------------------------------------------
     //
-    // 2026-08-18: moved here from the main Resonite SDK Manager panel (ResoniteLinkWindow.cs)
-    // per Tanossy's feedback — "Convert Skybox and the rest weren't originally there either,
-    // right? Don't dirty ResoniteSDK." Checked against upstream Yellow-Dog-Man/Resonite.UnitySDK
-    // directly: Convert Skybox IS vanilla (left in place on the main panel), but these two are
-    // genuine overlay additions (both from the 2026-08-08 tonemap-compensation commit), so they
-    // move here. Same drawn-unconditionally rationale as Send-Time Light Tuning above (both take
+    // Moved here from the main Resonite SDK Manager panel (ResoniteLinkWindow.cs). Checked
+    // against upstream Yellow-Dog-Man/Resonite.UnitySDK directly: Convert Skybox IS vanilla (left
+    // in place on the main panel), but these two are genuine overlay additions, so they move
+    // here. Same drawn-unconditionally rationale as Send-Time Light Tuning above (both take
     // effect at conversion/send time, regardless of which baker produced the lightmap). Backing
     // state lives in ConversionPassState.ForceRefreshGeneratedLightmaps / ToneMapCompensationState
     // .Enabled — this window just mirrors the checkbox into those statics every OnGUI, same as
