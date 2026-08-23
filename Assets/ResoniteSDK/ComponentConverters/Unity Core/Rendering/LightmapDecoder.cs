@@ -66,7 +66,15 @@ public static class LightmapDecoder
     // (BakedLightmapStandardConverter.AdditiveFillStrength) when an overall bake reads too dark
     // (measured linear averages as low as ~0.06-0.14 are not unusual): because this is a
     // multiplier, white stays white and brown stays brown as both get brighter, whereas an
-    // additive fill flattens color contrast.
+    // additive fill flattens color contrast. 1.1 is the value one particular bedroom scene's
+    // live-tuning pass converged on (an earlier trial in that same pass used 3.0, which a prior
+    // draft of this comment incorrectly called "the verified value" - it wasn't; 1.1 is).
+    //
+    // Being a single global constant, the right boost depends on how dark a given room's own
+    // bake data is - a value tuned for one scene isn't guaranteed to fit another (same class of
+    // bug LightTuning.IntensityCeiling was introduced to fix on the real-time-light side). Also
+    // exposed as a slider in the Lightmap Pipeline panel's "Baked Lightmap Exposure" section so
+    // it can be re-tuned per room without a code edit; changing it here still works too.
     public static float RangeScale = 1.1f;
 
     // LightConverter.WhiteBalanceShift only pulls Point Light colors toward white, so it has no
@@ -74,7 +82,8 @@ public static class LightmapDecoder
     // warm-colored lights). Because SecondaryAlbedo is a multiply, tinted bake data pulls the
     // whole room's color tone toward warm regardless of that setting. 1.0 = color unchanged,
     // 0.0 = fully desaturated (equivalent to desaturate=true); intermediate values keep some
-    // color character while suppressing an excessive warm cast.
+    // color character while suppressing an excessive warm cast. Same per-scene caveat and panel
+    // exposure as RangeScale above.
     public static float ColorSaturationCompensation = 0.6f;
 
     // ResoniteLink can drop the WebSocket while importing very large decoded lightmap PNGs. Keep

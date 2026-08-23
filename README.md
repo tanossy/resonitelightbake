@@ -139,8 +139,10 @@ Lightmapper baked lightmaps in Resonite. Operational notes:
 There's a real gap between how a scene looks in the Unity Editor and how it looks on a
 live Resonite client. The following static values were tuned iteratively against a running
 client. `IntensityCeiling`/`WhiteBalanceShift` have sliders in the **Lightmap Pipeline**
-panel's "Send-Time Light Tuning" section (`Resonite SDK > Lightmap Pipeline`, applies to
-either baker — see that panel's own section below); the rest still require a code edit:
+panel's "Send-Time Light Tuning" section, and `RangeScale`/`ColorSaturationCompensation`
+have sliders in that same panel's "Baked Lightmap Exposure" section (`Resonite SDK >
+Lightmap Pipeline`, both sections apply to either baker — see that panel's own section
+below); the rest still require a code edit:
 
 | File | Field | Current value | Meaning |
 |---|---|---|---|
@@ -235,10 +237,13 @@ comments for why full grading was tried and reverted).
     path, an experimental "bake normal detail into lightmap" option, a "Send-Time Options"
     section (Force Refresh Generated Lightmaps / Send Tonemap Compensation toggles, moved
     here from the main SDK panel since they're overlay additions, not vanilla
-    Resonite.UnitySDK), and a "Send-Time Light Tuning" section
-    (`LightTuning.IntensityCeiling`/`WhiteBalanceShift` sliders) — both of the latter two
-    shown regardless of baker since they apply at conversion/send time, not at bake time.
-    The actual bake/
+    Resonite.UnitySDK), a "Send-Time Light Tuning" section
+    (`LightTuning.IntensityCeiling`/`WhiteBalanceShift` sliders), and a "Baked Lightmap
+    Exposure" section (`LightmapDecoder.RangeScale`/`ColorSaturationCompensation` sliders —
+    a bake's own brightness varies per scene, so these are meant to be re-checked whenever
+    you switch rooms) — all three of the latter sections are shown regardless of baker since
+    they apply at conversion/send time (or, for the last one, at lightmap-decode time), not
+    at bake time. The actual bake/
     send logic lives in `LightmapTestHarness.cs`, which the panel calls into (no duplicated
     logic) and which can also be driven by an external process by writing a command string
     to `Temp/lightmap_harness_cmd.txt` (see that file's header comment for the command
@@ -419,9 +424,10 @@ Resonite側でも近い見た目に近似するパイプライン。運用の要
 
 Unity上での見た目とResonite実機での見た目にギャップがあり、以下のstatic値を実機検証しながら
 調整している。`IntensityCeiling`/`WhiteBalanceShift` は **Lightmap Pipeline** パネルの
-「送信時ライト調整」セクション（`Resonite SDK > Lightmap Pipeline`。どちらのBakerでも使える。
-下記のパネル説明も参照）にスライダーがある。残りは値を変えたい場合コード内の該当フィールドを
-直接編集する:
+「送信時ライト調整」セクションに、`RangeScale`/`ColorSaturationCompensation` は同パネルの
+「ベイクライトマップ露出」セクションにスライダーがある（`Resonite SDK > Lightmap Pipeline`。
+いずれもどちらのBakerでも使える。下記のパネル説明も参照）。残りは値を変えたい場合コード内の
+該当フィールドを直接編集する:
 
 | ファイル | フィールド | 現在値 | 意味 |
 |---|---|---|---|
@@ -510,8 +516,11 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
     「法線を焼き込む」オプション、「送信時オプション」セクション（Force Refresh Generated
     Lightmaps / Send Tonemap Compensationトグル。本家Resonite.UnitySDK非搭載のオーバーレイ
     独自機能のためメインSDKパネルからこちらへ移設）、「送信時ライト調整」セクション
-    （`LightTuning.IntensityCeiling`/`WhiteBalanceShift`のスライダー）も備える。後者2つは
-    ベイク時ではなく変換/送信時に効く値のためBaker非依存で常時表示。実際のベイク・送信
+    （`LightTuning.IntensityCeiling`/`WhiteBalanceShift`のスライダー）、「ベイクライトマップ
+    露出」セクション（`LightmapDecoder.RangeScale`/`ColorSaturationCompensation`のスライダー。
+    焼きデータの明るさはシーンごとに違うため部屋を変えたら要再確認）も備える。後者3つは
+    ベイク時ではなく変換/送信時（露出は正確にはデコード時）に効く値のためBaker非依存で
+    常時表示。実際のベイク・送信
     ロジックは`LightmapTestHarness.cs`
     にあり、このパネルはそれを呼ぶだけ（ロジックの重複なし）。`Temp/lightmap_harness_cmd.txt`
     にコマンド文字列を書き込むことで外部プロセスからも駆動できる（コマンド一覧は同ファイルの

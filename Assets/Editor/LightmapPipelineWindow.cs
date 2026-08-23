@@ -32,6 +32,10 @@
 //                          IntensityCeiling/WhiteBalanceShiftを直接編集。ベイク結果自体では
 //                          なく変換/送信時にのみ効く値のためBaker非依存）。
 //                          DrawSendTimeLightTuningSection()参照。
+//   ベイクライトマップ露出 -> どちらのBakerでも常時表示（ResoniteSDK/LightmapDecoder.csの
+//                          RangeScale/ColorSaturationCompensationを直接編集。焼きデータの
+//                          明るさはシーンごとに違うため部屋を変えたら要調整）。
+//                          DrawBakedLightmapExposureSection()参照。
 //   [Convert Lights]   -> Baker==Bakery のときだけ表示（Unity Standard時は非表示）
 //   [Bake] [Bake & Send] の1列のみ
 //   Status / Result Log
@@ -315,6 +319,27 @@ public class LightmapPipelineWindow : EditorWindow
     const string TooltipToneMapCompensationJA = "マテリアル色とReflection Probe強度へトーンマップ近似補正を掛ける（実験的）";
     const string TooltipToneMapCompensationEN = "Apply a tonemap approximation to material colors and Reflection Probe intensity (experimental).";
 
+    // --- Baked Lightmap Exposure section state --------------------------------------------
+    //
+    // Mirrors ResoniteSDK/LightmapDecoder.cs's static RangeScale/ColorSaturationCompensation
+    // fields — the exposure boost and desaturation applied to the baked lightmap texture itself
+    // before it multiplies onto material color (see that file's own doc comments for the full
+    // rationale). Distinct from Send-Time Light Tuning above, which scales the scene's live
+    // Unity Light components, not the baked texture — a room with no baked lightmap on it is
+    // untouched by this section. Both fields were tuned against one specific scene's bake data;
+    // a new room's bake can be darker or brighter, so re-check these whenever you switch rooms.
+    float _bakedLightmapRangeScale = 1.1f;
+    float _bakedLightmapSaturation = 0.6f;
+
+    const string BakedLightmapExposureHeaderJA = "ベイクライトマップ露出";
+    const string BakedLightmapExposureHeaderEN = "Baked Lightmap Exposure";
+
+    const string TooltipRangeScaleJA = "ベイクライトマップの明るさブースト（マテリアル色への乗算前に適用）。暗い部屋ほど高い値が要る。シーンごとに焼きデータの明るさが違うため、部屋を変えたら要調整";
+    const string TooltipRangeScaleEN = "Brightness boost applied to the baked lightmap before it multiplies onto material color. Darker bakes need a higher value; re-check this whenever you switch to a different room, since bake brightness varies per scene.";
+
+    const string TooltipBakedSaturationJA = "ベイクライトマップの彩度（1=元の色のまま、0=完全に無彩色）。暖色ライトで焼かれたデータが部屋全体を色被りさせるのを抑える";
+    const string TooltipBakedSaturationEN = "Saturation of the baked lightmap itself (1 = unchanged, 0 = fully desaturated). Tames a warm-colored bake tinting the whole room.";
+
     // Cached via reflection the first time it's needed; see GetRenderSettingsObjectForUndo().
     static MethodInfo _getRenderSettingsMethod;
 
@@ -460,6 +485,9 @@ public class LightmapPipelineWindow : EditorWindow
 
         EditorGUILayout.Space();
         DrawSendTimeLightTuningSection(baking);
+
+        EditorGUILayout.Space();
+        DrawBakedLightmapExposureSection(baking);
 
         EditorGUILayout.Space();
 
@@ -696,6 +724,35 @@ public class LightmapPipelineWindow : EditorWindow
 
         LightTuning.IntensityCeiling = _lightIntensityCeiling;
         LightTuning.WhiteBalanceShift = _lightWhiteBalanceShift;
+    }
+
+    // ------------------------------------------------------------------
+    // Baked Lightmap Exposure section — see the field-block comment above (near
+    // _bakedLightmapRangeScale/_bakedLightmapSaturation) for how this differs from Send-Time
+    // Light Tuning above it. Drawn unconditionally (both bakers) for the same reason as that
+    // section: LightmapDecoder runs on whatever baked lightmap ended up on a material regardless
+    // of which baker produced it. No "Apply" button — writes straight into LightmapDecoder's
+    // statics every OnGUI, and LightmapDecoder's own cache key already includes both values, so a
+    // changed slider naturally invalidates the cached decode and forces a re-decode on the next
+    // send (no separate "Force Refresh" needed for this specific pair of knobs).
+    // ------------------------------------------------------------------
+
+    void DrawBakedLightmapExposureSection(bool baking)
+    {
+        EditorGUILayout.LabelField(L(BakedLightmapExposureHeaderJA, BakedLightmapExposureHeaderEN), EditorStyles.boldLabel);
+
+        GUI.enabled = !baking;
+
+        _bakedLightmapRangeScale = EditorGUILayout.Slider(
+            new GUIContent(L("明るさブースト", "Range Scale"), L(TooltipRangeScaleJA, TooltipRangeScaleEN)),
+            _bakedLightmapRangeScale, 0.1f, 5f);
+
+        _bakedLightmapSaturation = EditorGUILayout.Slider(
+            new GUIContent(L("彩度", "Saturation"), L(TooltipBakedSaturationJA, TooltipBakedSaturationEN)),
+            _bakedLightmapSaturation, 0f, 1f);
+
+        LightmapDecoder.RangeScale = _bakedLightmapRangeScale;
+        LightmapDecoder.ColorSaturationCompensation = _bakedLightmapSaturation;
     }
 
     // "Bake normal detail into lightmap (experimental)" — see the file header comment's
