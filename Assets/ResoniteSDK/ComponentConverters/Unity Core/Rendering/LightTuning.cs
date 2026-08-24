@@ -25,13 +25,19 @@ public static class LightTuning
 
     // Blends each light's color toward white at send time (0 = unchanged, 1 = pure white),
     // compensating for a warm-toned baked scene reading noticeably more yellow in Resonite than
-    // in the Unity Editor. 0.7 is the current live-tuned value.
+    // in the Unity Editor. 0.4 was an earlier live-tuned value, rejected for leaving too much
+    // yellow; 0.7 replaced it but then turned out too strong the other way, confirmed live to
+    // leave Point Lights almost pure white and leaving the separate in-world Light Tuning
+    // Panel's own White Balance slider almost no color headroom to work with (that panel can
+    // only Lerp further from whatever baseline was actually sent - it can't recover color this
+    // field already blended away pre-send). 0.55 splits the difference between the two known-bad
+    // data points; still needs live re-verification after the next send.
     //
     // Known limitation: this Lerps every light uniformly toward white regardless of its
     // original hue, so a scene with multiple differently-colored lights would have those color
     // differences diluted equally. Fine for a single-color-scheme scene; a hue-aware version is
     // a natural follow-up if that ever matters.
-    public static float WhiteBalanceShift = 0.7f;
+    public static float WhiteBalanceShift = 0.55f;
 
     public static float ApplyIntensity(float unityIntensity) => unityIntensity * GetEffectiveIntensityMultiplier();
 
