@@ -104,12 +104,25 @@ these, except where noted):
   everything else succeeded
 - **Log Messages JSON** — log sent messages as JSON (debug only, default OFF)
 - **Reset Conversion State** — rebuilds `SceneConverter` and its converter/asset-root
-  state. The go-to recovery step when the connection gets into a bad state; meant to be
-  pressed before most re-sends
+  state. The recovery step for when the connection gets into a bad state (a timeout or a
+  mid-send disconnect), not something to press routinely
 - **Clear Generated Lightmap Variants** — deletes the whole
   `Assets/ResoniteSDK/Generated/LightmapVariants` folder (variant materials and decoded
   lightmap PNGs alike). Fully reproducible by re-running scene conversion, so always safe
   to run; doesn't need a ResoniteLink connection, works even mid-bake
+
+**TIPS: why aren't these two run automatically?** Both already have their own automatic
+staleness detection, so running them unconditionally on every send/bake would just waste
+work re-doing things that were already fine:
+- `SceneConverter.EnsureConverter()` already calls the equivalent of Reset conversion state
+  by itself whenever `UniqueSessionId` or `Port` actually changes - a normal healthy send
+  never needs it pressed manually. The manual button exists only for the case that check
+  can't catch: the session/port stayed the same, but something got stuck anyway.
+- `LightmapDecoder.cs` already re-decodes a lightmap the moment its source content hash
+  changes (see its `IsHashCurrent` check) - generated variants don't go stale silently.
+  Clear Generated Lightmap Variants exists for genuinely orphaned assets left behind by a
+  deleted/renamed scene, which - per that method's own doc comment - can't be safely swept
+  automatically without knowing every scene GUID that has ever existed.
 
 These used to live in a separate `ResoniteSDKDebugWindow.cs` (`Resonite SDK > Open Debug
 Tools`), which was removed for being redundant with this panel. Two buttons from that
@@ -416,10 +429,22 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
 - **Retry Missing Asset URLs** — アセットアップロードだけ失敗して他は成功している場合に使用
 - **Log Messages JSON** — 送信メッセージをJSONでログ出力（デバッグ用、デフォルトOFF）
 - **Reset Conversion State** — `SceneConverter`とコンバータ/アセットルートの状態を作り直す。
-  接続がおかしくなった時の基本の復旧手段。再送信の前は基本的にこれを押す運用を想定
+  接続がおかしくなった時（タイムアウトや送信中の切断）の復旧手段であり、日常的に押すものではない
 - **Clear Generated Lightmap Variants** — `Assets/ResoniteSDK/Generated/LightmapVariants`
   フォルダ（バリアントマテリアル・デコード済みライトマップPNG含む）を丸ごと削除。
   シーン再変換で完全に再生成されるため常に安全に実行可能。ResoniteLink接続不要・ベイク中でも実行可
+
+**TIPS: なぜこの2つは自動実行にしないのか？** どちらも既に自前の鮮度検知を持っているため、
+毎回の送信/ベイクで無条件に実行すると、壊れていないものまで毎回作り直す無駄が発生する:
+- `SceneConverter.EnsureConverter()`は`UniqueSessionId`または`Port`が実際に変わった時、既に
+  Reset conversion state相当の処理を自動で行っている——正常な送信では手動で押す必要は無い。
+  手動ボタンが必要なのは、セッション/ポートは変わっていないのに内部状態だけ壊れた、という
+  自動検知できないケースだけ。
+- `LightmapDecoder.cs`は焼きデータのコンテンツハッシュが変わった瞬間に自動で再デコードする
+  （`IsHashCurrent`チェック参照）——生成済みバリアントが黙って古くなることは無い。Clear
+  Generated Lightmap Variantsが必要なのは、シーンの削除/リネームで残った本当の孤児ファイル
+  で、これは同メソッド自身のコメントにある通り「過去に存在した全シーンGUIDを把握しない限り
+  安全に自動掃除できない」もの。
 
 これらは以前、独立した`ResoniteSDKDebugWindow.cs`（`Resonite SDK > Open Debug Tools`）に
 あったが、このパネルと冗長なため廃止された。同ウィンドウの2ボタンは移設しなかった:

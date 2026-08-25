@@ -378,14 +378,29 @@ public class LightmapPipelineWindow : EditorWindow
     const string TooltipSendLightmapsOnlyJA = "ライトマップのみ送信テスト（メッシュ/マテリアルは変更しない）";
     const string TooltipSendLightmapsOnlyEN = "Send only lightmap updates for testing; meshes and materials are left untouched.";
 
+    // Send Meshes/Materials Only predate this section's L(ja, en) convention (they moved here
+    // verbatim from the deleted ResoniteSDKDebugWindow.cs, which never localized anything) and
+    // were missed when this section was written. Send Lightmaps Only was new at that point so it
+    // got the convention from the start for its tooltip, but its visible label was missed too.
+    const string TooltipSendMeshesOnlyJA = "メッシュのみ送信テスト（マテリアルは変更しない）";
+    const string TooltipSendMeshesOnlyEN = "Send only mesh asset/provider updates; material slots are left untouched.";
+
+    const string TooltipSendMaterialsOnlyJA = "マテリアルのみ送信テスト（メッシュは変更しない）";
+    const string TooltipSendMaterialsOnlyEN = "Send only material and texture updates; mesh providers are left untouched.";
+
     const string TooltipRetryMissingAssetURLsJA = "URLが確定していない（送信済みだが未解決の）アセットへの送信を再試行する";
     const string TooltipRetryMissingAssetURLsEN = "Retry sending assets that were sent but never received a resolved URL.";
 
     const string TooltipLogMessageJSONJA = "ResoniteLinkの送受信メッセージをJSONとしてログへ出力する（デバッグ用）";
     const string TooltipLogMessageJSONEN = "Log ResoniteLink send/receive messages as JSON (for debugging).";
 
-    const string TooltipResetConversionStateJA = "シーン内のコンバータと変換ルート(__UnityAssets/__UnitySkybox)を破棄し、変換状態を最初からやり直す。再送信の前は基本的にこれを押す運用を想定（部分送信ボタン群はResetとは独立した「一部だけ直す」用途なのでResetでは代替されない）";
-    const string TooltipResetConversionStateEN = "Destroys the scene's converters and conversion roots (__UnityAssets/__UnitySkybox) and starts the conversion state fresh. Intended to be pressed before most re-sends (the partial-send buttons above serve a separate \"fix just one part\" use case that Reset does not replace).";
+    // SceneConverter.EnsureConverter() already auto-resets whenever the session ID or port
+    // actually changes, so a normal healthy send never needs this pressed manually. It's a
+    // recovery step for the case auto-detection can't catch - the session/port stayed the same
+    // but something got stuck anyway (e.g. after the 60-second AssetConverter.cs timeout, or a
+    // WebSocket disconnect mid-send) - not something to run routinely.
+    const string TooltipResetConversionStateJA = "シーン内のコンバータと変換ルート(__UnityAssets/__UnitySkybox)を破棄し、変換状態を最初からやり直す。セッションID/ポートが変わった時は自動でリセットされるため、通常の送信では不要。タイムアウトやWebSocket切断など、自動検知できない形で状態が壊れた時にだけ押す（部分送信ボタン群はResetとは独立した「一部だけ直す」用途なのでResetでは代替されない）";
+    const string TooltipResetConversionStateEN = "Destroys the scene's converters and conversion roots (__UnityAssets/__UnitySkybox) and starts the conversion state fresh. A normal send doesn't need this - EnsureConverter() already resets automatically whenever the session/port changes. Press it when something breaks in a way that auto-detection can't catch (e.g. a timeout or WebSocket disconnect mid-send), not routinely (the partial-send buttons above serve a separate \"fix just one part\" use case that Reset does not replace).";
 
     const string TooltipClearGeneratedLightmapVariantsJA = "Unity側に生成済みのライトマップ差分アセット(.matファイル等、Assets/ResoniteSDK/Generated/LightmapVariants)を削除する。変換状態リセットとは別軸（Resonite側の変換状態ではなくUnity側のローカル生成物）なのでResetでは代替されない";
     const string TooltipClearGeneratedLightmapVariantsEN = "Deletes the generated lightmap variant assets on the Unity side (.mat files etc. under Assets/ResoniteSDK/Generated/LightmapVariants). Independent from Reset Conversion State (this clears local Unity-side generated assets, not Resonite-side conversion state), so Reset does not replace it.";
@@ -730,6 +745,15 @@ public class LightmapPipelineWindow : EditorWindow
 
         GUI.enabled = !baking;
 
+        // EditorGUILayout.Toggle draws its checkbox glyph starting at
+        // EditorGUIUtility.labelWidth from the left edge, not after however long the label text
+        // actually is - Unity's default labelWidth (~150px) isn't wide enough for the longer
+        // Japanese labels below, so the checkbox ends up drawn on top of the tail of the text.
+        // Widened just for this section's two toggles and restored immediately after, so it
+        // doesn't affect any other section's layout.
+        float previousLabelWidth = EditorGUIUtility.labelWidth;
+        EditorGUIUtility.labelWidth = 240f;
+
         _forceRefreshGeneratedLightmaps = EditorGUILayout.Toggle(
             new GUIContent(L("生成済みライトマップを強制再生成", "Force Refresh Generated Lightmaps"), L(TooltipForceRefreshJA, TooltipForceRefreshEN)),
             _forceRefreshGeneratedLightmaps);
@@ -737,6 +761,8 @@ public class LightmapPipelineWindow : EditorWindow
         _sendToneMapCompensation = EditorGUILayout.Toggle(
             new GUIContent(L("トーンマップ補正を送信（実験的）", "Send Tonemap Compensation (experimental)"), L(TooltipToneMapCompensationJA, TooltipToneMapCompensationEN)),
             _sendToneMapCompensation);
+
+        EditorGUIUtility.labelWidth = previousLabelWidth;
 
         ConversionPassState.ForceRefreshGeneratedLightmaps = _forceRefreshGeneratedLightmaps;
         ToneMapCompensationState.Enabled = _sendToneMapCompensation;
@@ -751,6 +777,12 @@ public class LightmapPipelineWindow : EditorWindow
     // next Send Current Scene/Bake & Send actually does, without needing a scene edit first.
     // ------------------------------------------------------------------
 
+    // Defaults the "Reset to Defaults" button below restores - kept as named constants (rather
+    // than repeating the field initializers' literals inline at the button call site) so the
+    // two stay in sync if either default is ever re-tuned again.
+    const float DefaultLightIntensityCeiling = 0.9f;
+    const float DefaultLightWhiteBalanceShift = 0.55f;
+
     void DrawSendTimeLightTuningSection(bool baking)
     {
         EditorGUILayout.LabelField(L(SendTimeTuningHeaderJA, SendTimeTuningHeaderEN), EditorStyles.boldLabel);
@@ -764,6 +796,18 @@ public class LightmapPipelineWindow : EditorWindow
         _lightWhiteBalanceShift = EditorGUILayout.Slider(
             new GUIContent(L("白色寄せ", "White Balance Shift"), L(TooltipWhiteBalanceShiftJA, TooltipWhiteBalanceShiftEN)),
             _lightWhiteBalanceShift, 0f, 1f);
+
+        // Restores both sliders to the tuned defaults above, not to some neutral/no-op value -
+        // these two were arrived at through several rounds of live-tuning earlier (see
+        // LightTuning.cs's own field comments), so "reset" here means "back to the last known
+        // good values", the same way undoing an accidental drag would.
+        if (GUILayout.Button(new GUIContent(L("既定値に戻す", "Reset to Defaults"), L(
+            "明るさの上限・白色寄せを、実機で調整済みの既定値に戻す",
+            "Restores Intensity Ceiling and White Balance Shift to their real-machine-tuned default values."))))
+        {
+            _lightIntensityCeiling = DefaultLightIntensityCeiling;
+            _lightWhiteBalanceShift = DefaultLightWhiteBalanceShift;
+        }
 
         LightTuning.IntensityCeiling = _lightIntensityCeiling;
         LightTuning.WhiteBalanceShift = _lightWhiteBalanceShift;
@@ -819,13 +863,13 @@ public class LightmapPipelineWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
 
-        if (GUILayout.Button(new GUIContent("Send Meshes Only", "Send only mesh asset/provider updates; material slots are left untouched.")))
+        if (GUILayout.Button(new GUIContent(L("メッシュのみ送信", "Send Meshes Only"), L(TooltipSendMeshesOnlyJA, TooltipSendMeshesOnlyEN))))
             LightmapTestHarness.ConvertMeshesOnly();
 
-        if (GUILayout.Button(new GUIContent("Send Materials Only", "Send only material and texture updates; mesh providers are left untouched.")))
+        if (GUILayout.Button(new GUIContent(L("マテリアルのみ送信", "Send Materials Only"), L(TooltipSendMaterialsOnlyJA, TooltipSendMaterialsOnlyEN))))
             LightmapTestHarness.ConvertMaterialsOnly();
 
-        if (GUILayout.Button(new GUIContent("Send Lightmaps Only", L(TooltipSendLightmapsOnlyJA, TooltipSendLightmapsOnlyEN))))
+        if (GUILayout.Button(new GUIContent(L("ライトマップのみ送信", "Send Lightmaps Only"), L(TooltipSendLightmapsOnlyJA, TooltipSendLightmapsOnlyEN))))
             LightmapTestHarness.ConvertLightmapsOnly();
 
         EditorGUILayout.EndHorizontal();
