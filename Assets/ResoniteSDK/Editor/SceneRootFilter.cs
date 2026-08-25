@@ -50,6 +50,15 @@ public static class SceneRootFilter
         if (HasMissingScriptInHierarchy(root))
             return true;
 
+        // Some third-party tools (e.g. Bakery's own lightmap-cache bookkeeping object,
+        // "!ftraceLightmaps") create scene GameObjects with HideFlags.HideInHierarchy - the
+        // tool itself considers them internal and hides them from the Unity Hierarchy window,
+        // though GetRootGameObjects() still enumerates them for scene conversion. Checked via
+        // this flag rather than by name/type, so it generalizes to any other tool's similarly
+        // self-hidden bookkeeping objects.
+        if ((root.hideFlags & HideFlags.HideInHierarchy) != 0)
+            return true;
+
         return false;
     }
 

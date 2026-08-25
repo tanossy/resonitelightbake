@@ -127,6 +127,12 @@ The following are automatically excluded from the set of scene roots sent
   that aren't broken prefab instances themselves (e.g. a non-broken `Easy Mirror` prefab
   whose nested "UI" child carries an unresolvable VRChat SDK script) — this check walks
   the whole hierarchy rather than just the root, since not every case sits at the top.
+- Any root with `HideFlags.HideInHierarchy` set — some third-party tools create scene
+  GameObjects with this flag for their own internal bookkeeping (e.g. Bakery's own
+  lightmap-cache object, `!ftraceLightmaps`) and hide them from the Unity Hierarchy
+  window themselves, though `GetRootGameObjects()` still enumerates them for scene
+  conversion. Checked via the flag rather than by name, so it generalizes to any other
+  tool's similarly self-hidden objects.
 
 #### Baked lightmap → Resonite import
 
@@ -421,6 +427,11 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
   ツールと同じ判定方法）。壊れたprefabインスタンス自体ではないVRChat由来の残骸
   （例: `Easy Mirror`——prefab自体は正常だが、その子`UI`が解決不能なVRChat SDKスクリプトを
   持つ）も拾える。ルートだけでなく階層全体を走査する（該当箇所がルート直下とは限らないため）。
+- `HideFlags.HideInHierarchy`が付いたルート。一部のサードパーティツールが自身の内部帳簿管理用
+  にこのフラグ付きでシーンGameObjectを作ることがある（例: Bakeryのライトマップキャッシュ用
+  オブジェクト`!ftraceLightmaps`。ツール自身がUnity Hierarchyウィンドウから隠しているが、
+  `GetRootGameObjects()`はシーン変換時にこれも列挙してしまう）。名前ではなくフラグで判定して
+  いるため、同様に自己非表示化する他ツールのオブジェクトにも汎用的に対応できる。
 
 #### ライトマップベイク → Resonite取り込み
 
