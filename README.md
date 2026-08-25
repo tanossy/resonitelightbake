@@ -62,6 +62,44 @@ fork-point commit to check whether anything upstream needs to be manually re-mer
 API, zero commits of drift, no open PRs pending. That will very likely change over time, so
 don't assume it's still current just because it says so here — check for yourself.)*
 
+### Updating this overlay after an upstream SDK release
+
+Subclassing/overriding an official converter isn't an option here — see "Why official files
+are edited directly, not subclassed" below — so bringing this overlay forward after an
+upstream release means re-applying its edits by hand, file by file:
+
+1. **Check what changed upstream first.** For every file tagged `[official, modified]` in the
+   folder structure below, diff it between this repo's fork-point commit and the new upstream
+   release. Only files where upstream actually changed something need attention in step 3 —
+   everything else can just be re-applied as-is.
+2. **Update the official SDK as usual**, following its own instructions (delete
+   `Assets/ResoniteSDK/`, import the new version). This wipes this overlay entirely — expected,
+   see the warning above.
+3. **Re-import this overlay** (its `.unitypackage`, or copy `Assets/ResoniteSDK/` from this
+   repo). For any file flagged in step 1 as changed upstream, don't just let the reimport
+   silently overwrite it back to this fork's old content — open the new upstream version and
+   manually re-apply this overlay's specific edit (the diffs are small for most files; see
+   "Design principle" below for which ones carry a larger diff and why).
+4. **Verify**: the project compiles, and a real `Bake & Send` round-trip still lands correctly
+   in a running Resonite session.
+5. **Update this README**: the "Fork point" commit hash at the top, and the "Status as of..."
+   drift-check note above.
+
+### Why official files are edited directly, not subclassed
+
+The obvious-looking alternative — subclass the official converter, register a new one instead
+of editing it — doesn't work with this SDK's architecture.
+`Assets/ResoniteSDK/Editor/ComponentConverterRepository.cs` builds its Unity-type → converter
+mapping by scanning every non-abstract subclass of `ResoniteComponentConverter` in the project
+(`TypeCache.GetTypesDerivedFrom`) and inserting each into a plain `Dictionary<Type,
+ConverterInfo>` keyed by the Unity component type it converts, via `_converters.Add(...)`.
+That's a one-converter-per-type map with no override/priority mechanism — adding a second
+converter class for the same Unity type (e.g. a new class also handling `MeshRenderer`)
+doesn't shadow or replace the official one, it throws `ArgumentException` on the duplicate
+dictionary key at Editor startup. The only way to change a converter's behavior is to edit its
+class (or the static helper it calls into) directly, which is why the design principle below
+is "minimize the diff," not "avoid touching the file."
+
 ### Installation
 
 1. Set up the latest `Resonite.UnitySDK` in your Unity project as usual
@@ -365,6 +403,42 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
 `main`ブランチ先端と完全に一致しています——GitHub APIで直接確認済み、差分ゼロ・オープンPRも
 無し。ただしこれは時間とともに変わる前提で書いているので、ここに書いてあるからといって
 「今も最新のはず」と思い込まず、自分で確認してください。）*
+
+### 本家SDK更新時の追従手順
+
+このSDKの構造上、公式コンバータをサブクラス化して差し替える手段は無い（理由は次項「なぜ
+継承ではなく公式ファイルを直接編集するのか」参照）。つまり本家が更新された際は、変更内容を
+1ファイルずつ手作業で当て直すしかない:
+
+1. **まず上流側の変更点を確認する。** 下記フォルダ構成で「[公式・変更あり]」タグが付いている
+   各ファイルを、このリポジトリのフォーク元コミットと新しい本家リリースとの間でdiffする。
+   本家側で実際に変更が入っていたファイルだけ、手順3で個別対応が必要——それ以外はそのまま
+   再適用してよい。
+2. **本家SDKを通常手順で更新する**（`Assets/ResoniteSDK/`を削除してから新版をインポート）。
+   これでこのオーバーレイは完全に消える——想定通りの挙動（上記の警告参照）。
+3. **このオーバーレイを再インポート**する（`.unitypackage`、またはこのリポジトリの
+   `Assets/ResoniteSDK/`を直接コピー）。手順1で「本家側に変更あり」と分かったファイルは、
+   再インポートでフォーク時点の内容へ黙って巻き戻させてはいけない——新しい本家側の内容を
+   ベースに、このオーバーレイ独自の変更点を手動で当て直す（ほとんどのファイルは差分が
+   小さい。どのファイルがどのくらいの差分を抱えているかは下記「設計方針」参照）。
+4. **検証する**: コンパイルが通ること、実際に稼働中のResoniteセッションへ`Bake & Send`が
+   正しく届くこと。
+5. **このREADMEを更新する**: 冒頭の「フォーク元コミット」ハッシュと、上記「時点の状況」の
+   検証済み日付。
+
+### なぜ継承ではなく公式ファイルを直接編集するのか
+
+一見自然に見える代替案——公式コンバータを継承した新クラスを作って差し替える——は、この
+SDKの構造上そもそも成立しない。`Assets/ResoniteSDK/Editor/ComponentConverterRepository.cs`は
+プロジェクト内の`ResoniteComponentConverter`の非抽象サブクラスを全て`TypeCache
+.GetTypesDerivedFrom`でスキャンし、変換先のUnityコンポーネント型をキーにした素の
+`Dictionary<Type, ConverterInfo>`へ`_converters.Add(...)`で登録する仕組みになっている。
+これは「型1つにつきコンバータ1つ」のマッピングで、優先度やオーバーライドの仕組みは無い——
+同じUnity型（例えば`MeshRenderer`）を扱う2つ目のコンバータクラスを追加しても、公式側を
+覆い隠すのではなく、Dictionary側のキー重複で`ArgumentException`が起きてUnity起動時に
+落ちる。コンバータの挙動を変える唯一の方法はそのクラス（または呼び出し先の静的ヘルパー）
+自体を直接編集することであり、これが下記「設計方針」が「ファイルに触らない」ではなく
+「差分を最小化する」という方針になっている理由。
 
 ### 導入方法
 
