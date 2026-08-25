@@ -19,7 +19,6 @@ public abstract class AssetConverter : MonoBehaviour
         var name = AssetName;
         var timestamp = GetAssetTimestamp();
 
-        // Run any postprocessing
         PostProcessor?.Process(data);
 
         var conversionTask = Task.Run(async () =>
@@ -31,11 +30,10 @@ public abstract class AssetConverter : MonoBehaviour
                 if (!result.Success)
                     throw new InvalidOperationException($"Failed to convert {AssetClass} {name}: {result.ErrorInfo}");
 
-                // Assign the URL of the converted asset
                 var updateData = UpdateProvider(result.AssetURL, context);
 
-                // Sent as a separate message after the conversion completes (rather than combined
-                // into one call), so the provider update appears as a distinct step in the UI.
+                // Sent as a separate message after conversion completes, rather than combined into
+                // one call, so the provider update appears as a distinct step in the UI.
                 var update = new UpdateComponent()
                 {
                     MessageID = context.GetUniqueMessageId($"Update{AssetClass}Provider_{name}"),
@@ -64,8 +62,8 @@ public abstract class AssetConverter : MonoBehaviour
 
         conversionTask.Wait();
 
-        // Store the timestamp only after both the upload and provider URL update succeeded. Failed
-        // conversions must not look cached/current on the next send.
+        // Only recorded once upload and provider URL update both succeeded, so a failed conversion
+        // doesn't look cached/current on the next send.
         LastTimestamp = timestamp;
     }
 
@@ -116,7 +114,7 @@ public abstract class AssetConverter<TWrapper, TProvider, TUnity, TResonite> : A
 
     public override bool HasAssetChanged()
     {
-        // If the URL is missing, it needs to be converted again
+        // A missing URL means a previous conversion never completed, so it's due for a retry
         if (Provider.Data is IStaticAssetProvider staticProvider && staticProvider.URL == null)
             return true;
 
@@ -157,9 +155,9 @@ public abstract class AssetConverter<TWrapper, TProvider, TUnity, TResonite> : A
         }
         else
         {
-            // Procedural assets have no general way to detect whether they've changed, so they are
-            // re-converted on every send. A per-asset-type check (e.g. hashing pixel data for
-            // textures) could avoid this, but would add overhead.
+            // Procedural assets have no general way to detect whether they've changed, so they're
+            // re-converted on every send. A per-asset-type check (e.g. hashing texture pixel data)
+            // could avoid this, but would add overhead.
             return (ulong)DateTime.UtcNow.Ticks;
         }
     }

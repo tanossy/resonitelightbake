@@ -14,19 +14,15 @@ public struct AssetMap<A> : IEquatable<AssetMap<A>>
     public readonly A Asset;
     public readonly AssetMessagePostProcessor PostProcessor;
 
-    // Asset identity here is keyed on GUID + local file ID rather than the simpler alternatives.
-    // Keying on the Unity object reference alone breaks when a file is deleted and regenerated at
-    // the same path (e.g. via ForceRefreshGeneratedLightmaps): the underlying logical asset is the
-    // same, but the reference differs, so lookups miss the existing Converter/Resonite-side ID and
-    // a duplicate Slot/Component/ID gets added on every send. Keying on the asset path alone is
-    // also wrong: multiple sub-assets imported from a single file (e.g. several distinct Mesh
-    // objects inside one .fbx) all share the same AssetDatabase.GetAssetPath(), so path-only
-    // identity misidentifies unrelated sub-assets as "the same asset" and a later sub-asset
-    // overwrites the Source of an existing Converter, leaving multiple objects pointing at the
-    // same mesh/texture. GUID + local file ID (the pair of stable IDs Unity assigns to each
-    // sub-asset within a file) correctly distinguishes "the same file regenerated" from "a
-    // different sub-asset within the same file." Procedurally generated assets (which have no
-    // GUID/path) still fall back to reference-based identity.
+    // Identity is keyed on GUID + local file ID, not simpler alternatives. Reference identity alone
+    // breaks when a file is deleted and regenerated at the same path (e.g.
+    // ForceRefreshGeneratedLightmaps): the logical asset is the same but the reference differs, so
+    // lookups miss the existing Converter/Resonite-side ID and a duplicate gets sent. Path identity
+    // alone is also wrong: multiple sub-assets from one file (e.g. several Meshes in one .fbx) share
+    // the same AssetDatabase.GetAssetPath(), so path-only identity conflates them and a later
+    // sub-asset overwrites an earlier converter's Source. GUID + local file ID (Unity's own stable
+    // per-sub-asset ID pair) distinguishes both cases correctly. Procedural assets (no GUID/path)
+    // fall back to reference identity.
     readonly string _path;
 
     public AssetMap(A asset, AssetMessagePostProcessor postProcessor)
@@ -53,9 +49,9 @@ public struct AssetMap<A> : IEquatable<AssetMap<A>>
         if (_path != null && other._path != null)
             return _path == other._path;
 
-        // At least one side has no stable path (procedural asset, or one/both sides null) -
-        // only a path-vs-no-path pairing can never match here (intentional: a procedural asset
-        // must never accidentally alias a persisted one), so fall back to reference identity.
+        // No stable path on at least one side (procedural asset, or a null). A path vs. no-path
+        // pairing must never match (a procedural asset must never alias a persisted one), so fall
+        // back to reference identity.
         return _path == null && other._path == null && Asset == other.Asset;
     }
 
@@ -93,24 +89,22 @@ public class AssetConversionManager
     {
         Converter = converter;
 
-        // Check if there's already assets root in the world
         var roots = SceneManager.GetActiveScene().GetRootGameObjects();
 
         AssetsRoot = roots.FirstOrDefault(r => r.name == ASSETS_ROOT_NAME)?.transform;
 
         if(AssetsRoot != null)
         {
-            // Scan all the existing converters
             ScanConverters<StaticMesh, StaticMeshWrapper, UnityEngine.Mesh, FrooxEngine.Mesh, MeshConverter>(_meshes);
             ScanConverters<StaticTexture2D, StaticTexture2DWrapper, UnityEngine.Texture2D, FrooxEngine.Texture2D, Texture2DConverter>(_textures);
             ScanConverters<StaticCubemap, StaticCubemapWrapper, UnityEngine.Cubemap, FrooxEngine.Cubemap, CubemapConverter>(_cubemaps);
             ScanConverters<StaticAudioClip, StaticAudioClipWrapper, UnityEngine.AudioClip, FrooxEngine.AudioClip, AudioClipConverter>(_audioClips);
 
-            // Materials are special!
+            // Materials use their own scan/cache (keyed on Material alone, no AssetMap/postprocessor)
             ScanMaterials();
         }
         else
-            AssetsRoot = (new GameObject(ASSETS_ROOT_NAME)).transform; // Create new root
+            AssetsRoot = (new GameObject(ASSETS_ROOT_NAME)).transform;
     }
 
     void ScanConverters<TProvider, TWrapper, TUnity, TResonite, TConverter>(Dictionary<AssetMap<TUnity>, TConverter> map)
@@ -164,13 +158,11 @@ public class AssetConversionManager
 
     public void BeginConversion()
     {
-        // Clear all the cached materials from previous conversion. Unlike other asset types, materials can
-        // change between conversions - e.g. their parameters are updated, so we want to re-run the conversion
-        // every time.
+        // Materials (unlike other asset types) can change between conversions - e.g. parameter
+        // tweaks - so clear the cache to force re-conversion every run.
         _cachedMaterials.Clear();
 
-        // Since we're running a new conversion batch, we need to re-check all the converters again, because the assets
-        // might have changed.
+        // Re-check every converter each batch, since assets may have changed since the last run.
         _checkedConverters.Clear();
     }
 
@@ -251,35 +243,27 @@ public class AssetConversionManager
 
         if (!converters.TryGetValue(identity, out var converter))
         {
-            // There's no active converter for this, so create one
             var go = new GameObject();
             go.transform.parent = AssetsRoot;
 
             converter = go.AddComponent<TConverter>();
             converter.Initialize(unity, postProcessor);
 
-            // Since it's brand new it needs to be converted for the first time
             needsToConvert = true;
 
             converters.Add(identity, converter);
         }
         else
         {
-            // Identity matched by the stable asset path even though the live Unity object
-            // reference may differ (e.g. the asset was deleted and regenerated at the same path -
-            // see AssetMap's doc comment). Re-point the converter at the current live object before
-            // checking for changes, both so HasAssetChanged() isn't evaluating a stale/destroyed
-            // reference, and so the resulting update targets the ALREADY-SENT Resonite-side
-            // component (UpdateComponent) instead of us spawning a duplicate.
+            // Live reference may differ even though identity matched on the stable path (see
+            // AssetMap's doc comment) - re-point Source before checking for changes so
+            // HasAssetChanged() isn't evaluating a stale/destroyed object, and the resulting update
+            // targets the already-sent Resonite-side component instead of spawning a duplicate.
             if (!ReferenceEquals(converter.Source, unity))
                 converter.Source = unity;
 
             if (_checkedConverters.Add(converter) && converter.HasAssetChanged())
-            {
-                // We haven't checked this conversion yet for updates and the asset has changed
-                // so we need to run the conversion again to update the data
                 needsToConvert = true;
-            }
         }
 
         if (needsToConvert)
@@ -294,49 +278,43 @@ public class AssetConversionManager
 
     public IAssetProvider<FrooxEngine.Material> GetMaterial(UnityEngine.Material material)
     {
-        // Check if there's already conversion and it's bee updated
+        // Reuse this run's result if we've already resolved this material (separate from _materials,
+        // which persists the converter itself across runs)
         if (_cachedMaterials.TryGetValue(material, out var provider))
             return provider;
 
-        // Check if there's an active converter
         if (!_materials.TryGetValue(material, out var converter))
         {
-            // There's no converter! Try to find one
             var converterType = MaterialConverterRepository.TryGetConverter(material);
 
             if(converterType == null)
             {
                 Debug.LogWarning($"Unable to convert material {material}. Shader: {material.shader?.name}");
 
-                // Set it to null. We still want to cache null converted material so we're not doing
-                // this whole search & evaluation every single time this material is requested
+                // Cache the null result too, so we don't repeat this failed lookup on every request
                 converter = null;
             }
             else
             {
-                // Create the conversion
                 var root = new GameObject($"Material - {material.name}");
                 root.transform.parent = AssetsRoot;
 
-                // Attach the converter itself
                 converter = (ResoniteMaterialConverter)root.AddComponent(converterType);
                 converter.Source = material;
 
-                // We do want to store the converter across conversions - they will update existing material
-                // in place in most cases, so we don't want to keep making new ones all the time
+                // Stored across conversions since materials are usually updated in place rather than
+                // recreated
                 _materials.Add(material, converter);
             }
         }
 
-        // Update the conversion and get the latest material provider
-        // This is important, because converter can change the actual material instance depending on the
-        // properties provided. The converter can all be null, hence the null check
+        // UpdateConversion() can swap the actual material instance depending on its properties, hence
+        // re-fetching the provider here; converter may be null, hence the null-conditional
         provider = converter?.UpdateConversion(material, Converter);
 
         if (provider != null)
             _updatedAssetProviderRoots.Add(converter.transform);
 
-        // Cache it for this run - the same material only needs to be converted/updated once per run
         _cachedMaterials.Add(material, provider);
 
         return provider;
@@ -344,15 +322,12 @@ public class AssetConversionManager
 
     public void ProcessConversions(LinkInterface link)
     {
-        // EditorUtility.DisplayProgressBar/ClearProgressBar is intentionally not used in this
-        // loop. That dialog runs a modal-like GUI event pump on the Unity Editor's main thread,
-        // which overlaps in time with the asynchronous WebSocket send inside job.Convert() called
-        // right here (Task.Run(...).Wait() blocks the main thread while SendAsync/ReceiverHandler
-        // run on a separate thread). ResoniteLink.dll has a known unsynchronized race condition
-        // where ReceiverHandler can misfire with "no pending response with this ID" while
-        // SendMessage is in flight and call _client.Dispose(); omitting this UI element, which is
-        // unrelated to the SDK's core send/receive logic, rules it out as a possible contributor
-        // to widening that race's reproduction window.
+        // EditorUtility.DisplayProgressBar/ClearProgressBar is intentionally omitted from this
+        // loop: it pumps GUI events on the Editor main thread while job.Convert() blocks that same
+        // thread on an async WebSocket send (Task.Run(...).Wait()). ResoniteLink.dll has a known
+        // unsynchronized race where ReceiverHandler can misfire "no pending response with this ID"
+        // while a send is in flight and call _client.Dispose(); leaving the progress bar out rules
+        // it out as a contributor to widening that race's window.
         while (_scheduledConversions.Count > 0)
         {
             if (link == null || !link.IsConnected)
@@ -375,7 +350,7 @@ public class AssetConversionManager
             }
         }
 
-        // Once conversions are processed, clear this. This is only relevant before the conversions take place
+        // Only relevant before conversions run; clear once done
         _updatedAssetProviderRoots.Clear();
     }
 }

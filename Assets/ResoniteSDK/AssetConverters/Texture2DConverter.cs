@@ -118,8 +118,7 @@ public class Texture2DConverter : AssetConverter<StaticTexture2DWrapper, StaticT
         // We can only import the file directly if there's no postprocessing required
         if (!requiresPostProcessing && !isGeneratedLightmapPreview)
         {
-            // First try to import it as a file. This is easiest and will preserve most data
-            // Rather than just extracting the raw pixels
+            // Prefer importing as a file - preserves the most data, vs. extracting raw pixels.
             if (!string.IsNullOrWhiteSpace(assetPath))
             {
                 assetPath = Path.GetFullPath(assetPath);

@@ -56,56 +56,41 @@ public static class LightmapDecoder
     // (e.g. bright direct-light bounce, sun-facing surfaces). v1 stores the decoded result as an
     // 8-bit sRGB PNG, which can only represent the 0..1 range - any HDR headroom above 1.0 is
     // clamped away below. This multiplier is applied *before* that 0..1 clamp, as a manual
-    // exposure knob a caller (or a future automated pass, once real-machine appearance is
-    // verified against the source Unity bake) can use to pull an overbright lightmap's range down
-    // so more of it survives the clamp instead of blowing out to solid white. Default 1.0 = no
-    // adjustment. This is a static, process-wide knob rather than a per-lightmap one - v1 doesn't
-    // attempt per-lightmap auto-exposure.
+    // exposure knob to pull an overbright lightmap's range down so more of it survives the clamp
+    // instead of blowing out to solid white. Default 1.0 = no adjustment. This is a single global
+    // knob, not per-lightmap - v1 doesn't attempt per-lightmap auto-exposure.
     //
     // Prefer raising this value over boosting brightness via the additive fill
-    // (BakedLightmapStandardConverter.AdditiveFillStrength) when an overall bake reads too dark
-    // (measured linear averages as low as ~0.06-0.14 are not unusual): because this is a
-    // multiplier, white stays white and brown stays brown as both get brighter, whereas an
-    // additive fill flattens color contrast. 1.1 is the value one particular bedroom scene's
-    // live-tuning pass converged on (an earlier trial in that same pass used 3.0, which a prior
-    // draft of this comment incorrectly called "the verified value" - it wasn't; 1.1 is).
-    //
-    // Being a single global constant, the right boost depends on how dark a given room's own
-    // bake data is - a value tuned for one scene isn't guaranteed to fit another (same class of
-    // bug LightTuning.IntensityCeiling was introduced to fix on the real-time-light side). Also
-    // exposed as a slider in the Lightmap Pipeline panel's "Baked Lightmap Exposure" section so
-    // it can be re-tuned per room without a code edit; changing it here still works too.
+    // (BakedLightmapStandardConverter.AdditiveFillStrength) when an overall bake reads too dark:
+    // because this is a multiplier, white stays white and brown stays brown as both get brighter,
+    // whereas an additive fill flattens color contrast. 1.1 is a real-machine-tuned starting
+    // value; being a single global constant, the right value depends on how dark a given room's
+    // own bake data is, so it isn't guaranteed to fit every scene (same class of issue
+    // LightTuning.IntensityCeiling addresses on the real-time-light side). Also exposed as a
+    // slider in the Lightmap Bake & Send panel's "Baked Lightmap Exposure" section so it can be
+    // re-tuned per room without a code edit.
     public static float RangeScale = 1.1f;
 
-    // LightConverter.WhiteBalanceShift only pulls Point Light colors toward white, so it has no
-    // effect on the tint of the baked lightmap itself (data that was originally baked with
-    // warm-colored lights). Because SecondaryAlbedo is a multiply, tinted bake data pulls the
-    // whole room's color tone toward warm regardless of that setting. 1.0 = color unchanged,
-    // 0.0 = fully desaturated (equivalent to desaturate=true); intermediate values keep some
-    // color character while suppressing an excessive warm cast. Same per-scene caveat and panel
-    // exposure as RangeScale above.
+    // Because SecondaryAlbedo is a multiply, a lightmap baked with warm-colored lights pulls the
+    // whole room's tone toward warm regardless of any real-time light tuning (which only affects
+    // live Light components, not baked texture data). 1.0 = color unchanged, 0.0 = fully
+    // desaturated (equivalent to desaturate=true); intermediate values keep some color character
+    // while suppressing an excessive warm cast. Same per-scene caveat and panel exposure as
+    // RangeScale above.
     public static float ColorSaturationCompensation = 0.6f;
 
-    // ResoniteLink can drop the WebSocket while importing very large decoded lightmap PNGs. Keep
-    // this preview export small enough for reliable send/retry while preserving the same atlas UVs.
-    //
-    // The exact causal relationship between payload size and disconnect risk is not confirmed
-    // (candidate causes include ResoniteLink's BinaryPayloadMessage header/body send not being
-    // atomic, and .NET ClientWebSocket's automatic KeepAlive Ping colliding with a long-running
-    // send, but neither has been verified). Shrinking the export further reduces disconnect risk
-    // but visibly degrades a multi-object lightmap atlas - values well below 256 have been
-    // observed on real hardware to crush the atlas into blocky, jagged artifacts. 256 is the
-    // current real-machine-verified balance between the two; several instability factors on the
-    // Resonite side (duplicate slots, double-Destroy, etc.) have also since been fixed at the
-    // root, so it may be possible to raise this further once stability is reconfirmed.
+    // ResoniteLink can drop the WebSocket while importing very large decoded lightmap PNGs, so
+    // this preview export is kept small for reliable send/retry (the atlas UVs are unaffected).
+    // The exact cause of the disconnect isn't confirmed, but shrinking further visibly degrades a
+    // multi-object atlas - values well below 256 have been observed to crush it into blocky,
+    // jagged artifacts. 256 is the current real-machine-verified balance between the two.
     public static int MaxPreviewTextureSize = 256;
 
     /// <summary>
     /// Clears the in-memory decoded-lightmap front cache. Called from
-    /// LightmapMaterialCache's "Resonite SDK/Clear Generated Lightmap Variants" menu item right
-    /// before it deletes the on-disk Generated/LightmapVariants folder those cached Texture2D
-    /// references point into, so nothing here can hand out a reference to an asset that no longer
-    /// exists.
+    /// LightmapMaterialCache.ClearGeneratedLightmapVariants() right before it deletes the on-disk
+    /// Generated/LightmapVariants folder those cached Texture2D references point into, so nothing
+    /// here can hand out a reference to an asset that no longer exists.
     /// </summary>
     public static void ClearMemoryCache() => _decodedByPath.Clear();
 
@@ -408,8 +393,7 @@ public static class LightmapDecoder
             {
                 // Partial desaturation of the "color" (multiply) variant itself - see
                 // ColorSaturationCompensation's own doc comment for why this exists (the baked
-                // lightmap's own warm hue, independent of LightConverter.WhiteBalanceShift which
-                // only touches live Light components).
+                // lightmap's own warm hue, which real-time light tuning has no effect on).
                 float luma = (0.2126f * scaledR) + (0.7152f * scaledG) + (0.0722f * scaledB);
                 float sat = Mathf.Clamp01(ColorSaturationCompensation);
                 scaledR = Mathf.Lerp(luma, scaledR, sat);

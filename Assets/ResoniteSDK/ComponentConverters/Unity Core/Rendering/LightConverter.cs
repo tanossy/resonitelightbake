@@ -4,7 +4,6 @@ public static class LightHelper
 {
     public static void SetFrom(this FrooxEngine.Light resonite, UnityEngine.Light unity, IConversionContext context)
     {
-        // Set the basics
         resonite.SetFrom((UnityEngine.Behaviour)unity);
 
         switch (unity.type)
@@ -27,10 +26,11 @@ public static class LightHelper
                 break;
         }
 
-        // The send-time tuning values/logic have been moved out to LightTuning (a separate file,
-        // LightTuning.cs, in the same folder).
+        // Send-time intensity tuning is factored out to LightTuning.cs (same folder). A white
+        // balance shift used to live there too, blending color toward white on send; it was
+        // removed, so color now passes through unchanged.
         resonite.Intensity = LightTuning.ApplyIntensity(unity.intensity);
-        resonite.Color = new ColorX(LightTuning.ApplyColor(unity.color));
+        resonite.Color = new ColorX(unity.color);
 
         switch (unity.shadows)
         {
@@ -64,7 +64,6 @@ public class LightConverter : ResoniteSingleComponentConverter<Light, FrooxEngin
 {
     protected override void UpdateConversion(Light target, IConversionContext context)
     {
-        // We just assign the data
         Binding.Data.SetFrom(target, context);
     }
 }

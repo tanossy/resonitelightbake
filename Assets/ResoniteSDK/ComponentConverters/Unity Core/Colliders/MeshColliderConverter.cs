@@ -7,13 +7,12 @@ public static class MeshColliderHelper
         if (unity.convex)
             throw new System.InvalidOperationException($"Unity mesh collider is convex. You need to use ConvexHullCollider instead");
 
-        // Set the base data
         resonite.SetFrom((UnityEngine.Collider)unity);
 
         if (ConversionPassState.ShouldConvertMeshes)
             resonite.Mesh = context.GetMesh(unity.sharedMesh);
 
-        // Unity Mesh Colliders are one-sided based on their documentation:
+        // Unity Mesh Colliders are one-sided:
         // https://docs.unity3d.com/6000.3/Documentation/Manual/mesh-colliders-introduction.html
         resonite.Sidedness = MeshColliderSidedness.Front;
     }
@@ -23,7 +22,6 @@ public static class MeshColliderHelper
         if (!unity.convex)
             throw new System.InvalidOperationException($"Unity mesh collider is not convex. You need to use MeshCollider instead");
 
-        // Set the base data
         resonite.SetFrom((UnityEngine.Collider)unity);
 
         if (ConversionPassState.ShouldConvertMeshes)
@@ -38,8 +36,8 @@ public class MeshColliderConverter : ResoniteComponentConverter<UnityEngine.Mesh
 
     protected override void UpdateConversion(UnityEngine.MeshCollider target, IConversionContext context)
     {
-        // Resonite represents Convex Hull & Mesh Colliders through separate components, rather than one with a toggle
-        // We need to swith between them appropriately based on the flag whenever we update this.
+        // Resonite represents Convex Hull and Mesh colliders as separate components rather than
+        // one with a toggle, so switch between them based on Unity's convex flag.
         if(target.convex)
         {
             if (MeshBinding != null)

@@ -19,9 +19,9 @@ public class SkyboxConverter
     [NonSerialized]
     public FrooxEngine.ValueCopySH_L2_Wrapper ValueCopy;
 
-    // Unity cannot serialize the generated Resonite wrapper fields that contain
-    // Sync<UnityEngine.Rendering.SphericalHarmonicsL2>. Keep SH2 sky ambient disabled for the
-    // current baked-lightmap verification path; the skybox material/probe can still be converted.
+    // Unity cannot serialize the generated wrapper fields containing
+    // Sync<UnityEngine.Rendering.SphericalHarmonicsL2>, so SH2 sky ambient is disabled by
+    // default; skybox material/probe conversion still works either way.
     public static bool ConvertSphericalHarmonics = false;
 
     public void EnsureRoot()
@@ -29,13 +29,11 @@ public class SkyboxConverter
         if (SkyboxRoot != null)
             return;
 
-        // When Skybox/AmbientLight/ReflectionProbe are in Unity's "fake null" state (the native
-        // side has been destroyed but the C# reference itself is not null), `?.` (C#'s
-        // null-conditional operator) doesn't go through Unity's operator== overload, so the
-        // `.gameObject` access throws a MissingReferenceException. This can happen, for example,
-        // when the __UnitySkybox root is destroyed and these fields are restored via a domain
-        // reload. An explicit Unity-aware `!= null` check on each field safely skips over
-        // destroyed references.
+        // Use explicit Unity-aware `!= null` checks here, not `?.`: if these fields are in
+        // Unity's "fake null" state (native side destroyed, C# reference not null — e.g. after
+        // the __UnitySkybox root is destroyed and the fields survive a domain reload), the
+        // null-conditional operator skips Unity's operator== override and `.gameObject` throws
+        // a MissingReferenceException instead of being safely skipped.
         if (Skybox != null)
             SkyboxRoot = Skybox.gameObject;
         else if (AmbientLight != null)
@@ -45,18 +43,16 @@ public class SkyboxConverter
 
         if(SkyboxRoot == null)
         {
-            // Try to find it in the scene
             var roots = SceneManager.GetActiveScene().GetRootGameObjects();
             SkyboxRoot = roots.FirstOrDefault(r => r.name == SKYBOX_ROOT_NAME);
         }
 
-        // All failed, make one
         if(SkyboxRoot == null)
             SkyboxRoot = new GameObject(SKYBOX_ROOT_NAME);
     }
 
-    // TODO!!! Handle different types of ambient light for conversion
-    // Right now this just assumes that reflections and ambient light all come from the skybox
+    // TODO: assumes reflections and ambient light both come from the skybox; other ambient
+    // light setups aren't converted.
     public void ConvertCurrentSkybox(IConversionContext context)
     {
         EnsureComponent(ref Skybox);
@@ -75,12 +71,11 @@ public class SkyboxConverter
             EnsureComponent(ref ValueCopy);
         }
 
-        // Setup the skybox material itself
         var skyboxMaterial = context.GetMaterial(RenderSettings.skybox);
         Skybox.Data.Material = skyboxMaterial;
 
-        // Setup reflection probe for the skybox
-        // This is used for specular reflections and also to auto-calculate the SH2
+        // This reflection probe feeds both specular reflections and the SH2 ambient
+        // calculation below.
         ReflectionProbe.Data.SkyboxOnly = true;
         ReflectionProbe.Data.BoxSize = Vector3.one * 1000000;
         ReflectionProbe.Data.ClearFlags = Renderite.Shared.ReflectionProbeClear.Skybox;
@@ -97,14 +92,12 @@ public class SkyboxConverter
         if (!ConvertSphericalHarmonics)
             return;
 
-        // Assign the reflection probe as source for SH2 computation
         ReflectionProbeSH2.Data.Probe = ReflectionProbe.Data;
-        // This should make it look roughly the same as Unity's own calculation
+        // Tuned to roughly match Unity's own SH2 calculation.
         ReflectionProbeSH2.Data.Order0Scale = 1.5f;
         ReflectionProbeSH2.Data.Order1Scale = 0.5f;
         ReflectionProbeSH2.Data.Order2Scale = 0.5f;
 
-        // Copy the value from the SH2 to AmbientLight
         ValueCopy.Data.Source = ReflectionProbeSH2.Data.AmbientLight_Element.Member;
         ValueCopy.Data.Target = AmbientLight.Data.AmbientLight_Element.Member;
     }

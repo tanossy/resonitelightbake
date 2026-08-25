@@ -4,116 +4,68 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-// Bridges Unity's baked-lightmap system (Bakery included, since it also writes its results
-// through the standard renderer.lightmapIndex / lightmapScaleOffset / LightmapSettings.lightmaps
-// mechanism after baking - Unity-compatible non-directional mode only, see the Bakery note on
-// LightmapDecoder) into the conversion pipeline.
+// Bridges Unity's baked-lightmap system (including Bakery's Unity-compatible non-directional
+// mode, which also writes through the standard lightmapIndex/lightmapScaleOffset/
+// LightmapSettings.lightmaps mechanism - see the Bakery note on LightmapDecoder) into the
+// conversion pipeline.
 //
-// Renderite does not support custom shaders, so we cannot ship a "lit by lightmap" shader to
+// Renderite has no custom-shader support, so a "lit by lightmap" shader can't be shipped to
 // Resonite directly. Instead, when a MeshRenderer's material is Unity's Standard shader in
-// Opaque mode and has a valid baked lightmap assigned, we resolve (creating on first use) a
-// persisted Material *asset* using the ResoniteSDK/BakedLightmapStandard marker shader (see
-// BakedLightmapStandard.shader), carrying the decoded lightmap texture + ScaleOffset as extra
-// properties. BakedLightmapStandardConverter then routes that marker shader to
-// PBS_MultiUV_Metallic, folding the lightmap into the SecondaryAlbedo (UV1) slot.
+// Opaque mode with a valid baked lightmap, this resolves (creating on first use) a persisted
+// Material asset using the ResoniteSDK/BakedLightmapStandard marker shader, carrying the decoded
+// lightmap texture + ScaleOffset as extra properties. BakedLightmapStandardConverter then routes
+// that marker shader to PBS_MultiUV_Metallic, folding the lightmap into the SecondaryAlbedo (UV1)
+// slot. Any material/renderer combination that doesn't meet the eligibility criteria below is
+// returned unchanged and falls through to the regular converter.
 //
-// Any material/renderer combination that doesn't meet the criteria below is returned unchanged,
-// so it falls through to the regular StandardConverter (or whichever converter would otherwise
-// have handled it).
-//
-// Design notes:
-//  - Variants are real project assets living at a deterministic path under
-//    Assets/ResoniteSDK/Generated/LightmapVariants/<sceneGUID>/, rather than an in-memory
-//    Dictionary<CacheKey, Material> of HideFlags.DontSave clones. A DontSave-backed cache doesn't
-//    survive an Editor domain reload, which would leave any AssetConversionManager converter
-//    GameObject that already held a reference to a previous variant as its `Source` pointing at a
-//    destroyed/missing object post-reload; it also has no on-disk identity, so two different
-//    scenes converting the same source material could produce colliding names/instances. Looking
-//    a variant up is just AssetDatabase.LoadAssetAtPath - if it exists, Unity gives us back the
-//    *same* Material instance it always would for that path (survives domain reloads, scene
-//    reopens, and separate Editor sessions), and if it doesn't exist yet we create it once with
-//    AssetDatabase.CreateAsset. There is no in-memory cache to invalidate or go stale: the
-//    deterministic path *is* the cache key.
-//
-//  - Because a cache "hit" is now just "the asset already exists", we can no longer skip copying
-//    properties on a hit - if we did, edits to the source material after the first conversion
-//    would never propagate. So every property listed in GetVariantOrOriginalInner is
-//    unconditionally re-read from source and written to the variant on every call; a change is
-//    only detected (and EditorUtility.SetDirty called) property-by-property so we're not forcing
-//    a dirty/reserialize on every single frame when nothing actually changed.
-//
-//  - The deterministic asset name embeds the owning scene's GUID (unsaved scenes fall back to a
-//    shared "unsaved" bucket - see GetSceneGuid), so the same source material baked differently
-//    in two different scenes can never collide on the same variant asset.
-//
-//  - The ScaleOffset component of the name is a bit-exact hash of the Vector4 (see HashScaleOffset
-//    / FloatBits) instead of relying on float equality/GetHashCode, so two ScaleOffsets are only
-//    ever treated as identical if they're bit-for-bit the same value.
-//
-//  - GetVariantOrOriginal never throws: eligibility checks are defensive (including an explicit
-//    HasProperty("_Mode") guard), and the entire lookup/creation body is wrapped in a try/catch
-//    that logs and falls back to the original material rather than aborting the whole conversion.
-//
-//  - A session-scoped Dictionary<path, Material> cache (see _materialByPath below) fronts the
-//    AssetDatabase.LoadAssetAtPath lookup for performance. The on-disk asset remains the actual
-//    source of truth - if a domain reload clears the dictionary, the very next call just falls
-//    through to LoadAssetAtPath and refills it, so correctness never depends on the dictionary
-//    surviving a reload (this front-cache is deliberately NOT a replacement for the asset-backed
-//    design above, only a lookup-cost optimization on top of it). GetVariantOrOriginalInner still
-//    re-syncs every property on every call regardless of hit/miss - that part is unchanged and is
-//    cheap (in-memory Material property writes), unlike the AssetDatabase calls this cache
-//    actually saves.
-//
-//  - Because variant assets are named after a scene GUID + a hash of the source material +
-//    ScaleOffset, deleting/renaming a scene, or a scene being re-baked with different content,
-//    can leave old variant .mat/.png assets behind under
-//    Assets/ResoniteSDK/Generated/LightmapVariants/<sceneGUID>/ that nothing ever re-visits or
-//    deletes. There is no automatic sweep for these (doing so safely would require knowing every
-//    scene GUID that has ever existed, which isn't something we can enumerate reliably) - use the
-//    "Resonite SDK/Clear Generated Lightmap Variants" menu item below to nuke the entire generated
-//    folder on demand; every entry in it is fully reproducible by re-running the scene conversion.
-//
-//  - GetVariantOrOriginalInner has an additional branch, taken only when the renderer's lightmap
-//    slot was baked with a directional lightmapper (LightmapData.lightmapDir != null), that
-//    substitutes a per-renderer combined texture from DirectionalLightmapBaker in place of the
-//    plain shared-atlas decode - see that branch's own inline comment and
-//    DirectionalLightmapBaker.cs's header comment for the full design. A non-directional bake
-//    (lightmapDir == null) takes none of that code and is unaffected.
+// Key invariants:
+//  - Variants are real project assets at a deterministic path under
+//    Assets/ResoniteSDK/Generated/LightmapVariants/<sceneGUID>/, not in-memory DontSave clones - a
+//    DontSave cache wouldn't survive a domain reload (leaving stale `Source` references on
+//    converter GameObjects) and has no on-disk identity to prevent two scenes colliding on the
+//    same generated name. The deterministic path *is* the cache key: AssetDatabase.LoadAssetAtPath
+//    always returns the same instance for it, and AssetDatabase.CreateAsset creates it once if
+//    missing.
+//  - Because a "hit" is just "the asset already exists", every property is unconditionally
+//    re-read from source and (re-)written on every call in GetVariantOrOriginalInner - otherwise
+//    edits to the source material after first conversion would never propagate. Only whether
+//    anything actually changed is tracked, to avoid dirtying/reserializing when nothing did.
+//  - The asset name embeds the owning scene's GUID (unsaved scenes fall back to a shared
+//    "unsaved" bucket, see GetSceneGuid) and a bit-exact hash of the lightmap ScaleOffset (see
+//    HashScaleOffset/FloatBits, not float equality/GetHashCode), so two scenes or two bakes can
+//    never collide on the same variant.
+//  - GetVariantOrOriginal never throws: eligibility checks are defensive, and the lookup/creation
+//    body is wrapped in try/catch that logs and falls back to the original material.
+//  - A session-scoped Dictionary<path, Material> (_materialByPath) fronts the
+//    AssetDatabase.LoadAssetAtPath lookup purely for performance; the on-disk asset stays the
+//    source of truth, so a domain reload clearing the dictionary just refills it on the next call.
+//  - Variant assets can become orphaned (old scene GUID/hash combos left behind after a scene is
+//    deleted/renamed/re-baked) - there's no automatic sweep, since enumerating every scene GUID
+//    that ever existed isn't reliable. ClearGeneratedLightmapVariants() below nukes the entire
+//    generated folder on demand; everything in it is reproducible by re-running scene conversion.
+//  - GetVariantOrOriginalInner has an additional branch, taken only for a directional lightmapper
+//    bake (LightmapData.lightmapDir != null), that substitutes a per-renderer combined texture
+//    from DirectionalLightmapBaker in place of the shared-atlas decode - see that branch's inline
+//    comment and DirectionalLightmapBaker.cs's header for the full design.
 public static class LightmapMaterialCache
 {
     const string BakedLightmapShaderName = "ResoniteSDK/BakedLightmapStandard";
 
-    // Shaders whose Unity-side property block is a verified, property-for-property match with
-    // Unity's built-in Standard shader for every field this file reads below (_Color, _MainTex
-    // +Scale/Offset, _Metallic, _Glossiness, _MetallicGlossMap, _BumpMap, _BumpScale,
-    // _OcclusionMap, _EmissionMap, _EmissionColor, _Cutoff, _Mode, and the _EMISSION keyword) —
-    // so the exact same read/copy code below produces correct results for them too, without any
-    // separate conversion path. Verified against source, not assumed:
-    //   "Silent/Filamented" - Assets/sameR&D/Shader/Filamented_1.2/filamented-master/Filamented/
-    //     Standard.shader: Properties block declares every field above under the identical name,
-    //     including `_pragma shader_feature _EMISSION` matching Standard's own keyword
-    //     convention.
-    //   "Standard_Culloff" - Assets/sameR&D/Shader/Standard_Culloff.shader: same verification,
-    //     same result (double-sided/cull-off variant of Standard with an otherwise identical
-    //     property block).
-    //   "Autodesk Interactive" - Unity's own built-in shader, verified live via
-    //     UnityEditor.ShaderUtil.GetPropertyName/GetPropertyCount against the actual installed
-    //     shader, not assumed: declares _Color/_MainTex/_Cutoff/_Glossiness/_Metallic/
-    //     _MetallicGlossMap/_BumpScale/_BumpMap/_Parallax/_ParallaxMap/_OcclusionMap/
-    //     _EmissionColor/_EmissionMap/_Mode under the identical names this file reads. This is
-    //     Unity's own default fallback shader assigned by the FBX importer to materials with no
-    //     explicit shader baked in - very common across off-the-shelf asset-store 3D packs (this
-    //     was found affecting most furniture materials in the "simple room SGB" test scene), so
-    //     this is not a one-off addition.
-    // Do NOT add a shader here on assumption alone - a mismatched property name would silently
-    // read/write the wrong value (e.g. GetFloat on a missing property returns 0, which is
-    // indistinguishable from a legitimately-set 0). Confirm against the shader's actual
-    // Properties block first.
-    // public (not private/internal): this file has no "Editor" folder in its path, so it compiles
-    // into Assembly-CSharp, while LightmapTestHarness.cs (under Assets/Editor/) compiles into the
-    // separate Assembly-CSharp-Editor — `internal` only grants same-assembly visibility, which
-    // does NOT cross that boundary (confirmed via a real CS0117 here), so this must be public for
-    // shader_survey's "eligible" label to read the real list instead of duplicating it.
+    // Shaders verified (not assumed) to be a property-for-property match with Unity's built-in
+    // Standard shader for every field this file reads (_Color, _MainTex+Scale/Offset, _Metallic,
+    // _Glossiness, _MetallicGlossMap, _BumpMap, _BumpScale, _OcclusionMap, _EmissionMap,
+    // _EmissionColor, _Cutoff, _Mode, _EMISSION keyword), so the same read/copy code below
+    // produces correct results for them too. "Autodesk Interactive" matters in practice: it's
+    // Unity's FBX-importer fallback shader for materials with no explicit shader baked in, common
+    // across off-the-shelf asset packs.
+    //
+    // Do NOT add a shader here on assumption alone - a mismatched property name silently
+    // reads/writes the wrong value (GetFloat on a missing property returns 0, indistinguishable
+    // from a legitimately-set 0). Confirm against the shader's actual Properties block first.
+    //
+    // Must be public, not internal: this file compiles into Assembly-CSharp, while
+    // LightmapTestHarness.cs (Assets/Editor/) compiles into the separate Assembly-CSharp-Editor
+    // assembly, which `internal` visibility doesn't reach.
     public static readonly HashSet<string> StandardCompatibleShaderNames = new HashSet<string>
     {
         "Standard",
@@ -142,15 +94,9 @@ public static class LightmapMaterialCache
     /// fully reproducible by re-running scene conversion, so this is always safe to run. See the
     /// class-level comment for why orphaned variant assets can accumulate here over time.
     /// </summary>
-    // Moved out of its own standalone top-level menu item and into ResoniteSDKDebugWindow.cs
-    // (menu: Resonite SDK/Open Debug Tools), alongside the other cleanup/reset buttons.
-    //
-    // Update: ResoniteSDKDebugWindow.cs itself was found redundant with LightmapPipelineWindow.cs
-    // (menu: Resonite SDK/Lightmap Pipeline) and has since been deleted - the "Clear Generated
-    // Lightmap Variants" button now lives in that window's "Debug / Cleanup" section instead,
-    // calling this same method via a thin LightmapTestHarness.ClearGeneratedLightmapVariants()
-    // wrapper (keeping with that window's own "no logic in the GUI layer" rule). This method
-    // itself is unchanged either time - only the calling [MenuItem]/button entry point moved.
+    // Unchanged and still actively used - its only caller is now SceneConverter.ConvertScene(),
+    // which calls it automatically whenever the "Force Refresh Generated Lightmaps" toggle is on.
+    // There is no manual button for it.
     public static void ClearGeneratedLightmapVariants()
     {
         _materialByPath.Clear();
@@ -280,40 +226,26 @@ public static class LightmapMaterialCache
         // scene/index pair. See LightmapDecoder for the decode + persistence logic.
         var bakedLightmapTex = LightmapDecoder.GetDecodedLightmap(sceneGuid, lightmapIndex, lightmapData.lightmapColor);
 
-        // This class's own header comment ("returns source unchanged when eligibility conditions
-        // aren't met") promises source is returned unchanged whenever this material/renderer
-        // isn't eligible - but GetDecodedLightmap can itself return null (missing decode shader,
-        // failed AssetDatabase import, etc. - see its own doc comment) even once every
-        // eligibility check above has already passed. Falling through with bakedLightmapTex ==
-        // null would still create/keep the variant Material and unconditionally
-        // SetTexture("_BakedLightmap", null) on it below - producing a lightmap-marker-shaded
-        // material with NO lightmap texture actually assigned, instead of honoring the documented
-        // "fall back to source" contract. Bail out to the same `return source;` every other
-        // eligibility guard above already uses.
+        // GetDecodedLightmap can itself return null (missing decode shader, failed
+        // AssetDatabase import - see its own doc comment) even once every eligibility check
+        // above has passed. Bail out to the same `return source;` contract as those checks,
+        // rather than falling through and binding a null "_BakedLightmap" on the variant.
         if (bakedLightmapTex == null)
             return source;
 
         var bakedLightmapST = lightmapScaleOffset;
 
         // --- Experimental "bake in normals" path ---------------------------------------------
-        // Only taken when THIS lightmap slot was actually baked with a directional lightmapper
-        // (lightmapData.lightmapDir != null - Unity only ever populates lightmapDir when
-        // LightingSettings.directionalityMode was CombinedDirectional at bake time). Deliberately
-        // gated on the baked DATA itself rather than a flag threaded in from the calling
-        // project: this file has no reachable reference back to whatever harness/window
-        // requested the bake (SendCurrentScene()/SceneConverter call this converter with no such
-        // context), and gating on lightmapDir's actual presence means the OFF path
-        // (lightmapDir == null, i.e. a NonDirectional bake) is byte-for-byte identical to before
-        // this block existed - bakedLightmapTex/bakedLightmapST above are only ever overwritten
-        // when the branch below both triggers AND succeeds.
+        // Taken only when this lightmap slot was baked with a directional lightmapper
+        // (lightmapData.lightmapDir != null, set only when LightingSettings.directionalityMode
+        // was CombinedDirectional at bake time). Gated on the baked data itself, not a flag from
+        // the caller, so a NonDirectional bake takes none of this code and is unaffected.
         //
-        // Resonite/Renderite has no directional-lightmap material input (no "dominant
-        // direction" slot anywhere in this SDK's material graph, and the class comment above
-        // already establishes why a custom shader isn't an option) - see
-        // DirectionalLightmapBaker's own header comment for the full approximation this
-        // performs (per-renderer geometry-normal patch × UnityCG.cginc's own
-        // DecodeDirectionalLightmap() formula, baked once into a static combined color texture
-        // at Editor conversion time).
+        // Resonite/Renderite has no directional-lightmap material input, so a per-renderer
+        // combined texture from DirectionalLightmapBaker substitutes for the shared-atlas decode
+        // - see that file's header comment for the full approximation this performs
+        // (per-renderer geometry-normal patch x UnityCG.cginc's DecodeDirectionalLightmap()
+        // formula, baked once into a static texture at Editor conversion time).
         if (lightmapData.lightmapDir != null)
         {
             var normalBaked = DirectionalLightmapBaker.GetNormalBakedLightmap(renderer, sceneGuid, lightmapIndex, lightmapData, lightmapScaleOffset);
@@ -356,13 +288,10 @@ public static class LightmapMaterialCache
         changed |= SetFloatIfChanged(variant, "_Cutoff", source.GetFloat("_Cutoff"));
         changed |= SetFloatIfChanged(variant, "_Mode", source.GetFloat("_Mode"));
 
-        // Material.shaderKeywords (both the getter and the setter used here) is obsolete API, and
-        // wholesale-copying the source material's entire keyword set is dead weight anyway -
-        // BakedLightmapStandard.shader is a small, purpose-built marker shader (see that file)
-        // that only actually branches on _EMISSION, so every other keyword Standard might have
-        // set (_METALLICGLOSSMAP, _NORMALMAP, detail-map keywords, etc.) does nothing on this
-        // shader and was only ever being copied for no effect. Sync just the one keyword that
-        // matters, via the non-obsolete IsKeywordEnabled/EnableKeyword/DisableKeyword API.
+        // BakedLightmapStandard.shader only branches on the _EMISSION keyword, so that's the only
+        // one worth syncing (other Standard keywords like _METALLICGLOSSMAP/_NORMALMAP do nothing
+        // on this shader). Uses the non-obsolete IsKeywordEnabled/EnableKeyword/DisableKeyword API
+        // rather than the obsolete Material.shaderKeywords.
         bool sourceEmissionEnabled = source.IsKeywordEnabled("_EMISSION");
 
         if (variant.IsKeywordEnabled("_EMISSION") != sourceEmissionEnabled)
@@ -379,20 +308,11 @@ public static class LightmapMaterialCache
         changed |= SetVectorIfChanged(variant, "_BakedLightmapST", bakedLightmapST);
 
         // Desaturated companion for BakedLightmapStandardConverter's additive fill slot (see
-        // LightmapDecoder.GetDecodedLightmap's desaturate param doc comment). Decoded from the
-        // same source lightmapData.lightmapColor as bakedLightmapTex above, independent of the
-        // directional-lightmap override branch above (the desaturated fill approximates ambient
-        // brightness only, so it doesn't need the per-renderer normal-baked variant).
-        //
-        // Only decode/store this when the additive fill it feeds is actually enabled
-        // (BakedLightmapStandardConverter.AdditiveFillStrength > 0). When disabled (0 - pure
-        // multiply), SecondaryEmissiveColor is pure black regardless of what texture is bound
-        // here, so decoding (RenderTexture blit + resize + PNG encode + AssetDatabase import,
-        // every single conversion) and later uploading this texture to Resonite over ResoniteLink
-        // would be pure waste - visually a no-op, but real CPU/disk/network cost, and extra
-        // payload over a WebSocket transport already known to be flaky under load. The mechanism
-        // itself is untouched - setting AdditiveFillStrength back above 0 makes this
-        // decode/store path active again exactly as before.
+        // LightmapDecoder.GetDecodedLightmap's desaturate param doc comment). Only decoded when
+        // the fill it feeds is actually enabled (AdditiveFillStrength > 0) - when disabled,
+        // SecondaryEmissiveColor is pure black regardless of what's bound here, so decoding
+        // (RenderTexture blit + resize + PNG encode + AssetDatabase import) and uploading it over
+        // ResoniteLink would be a visually-inert but real CPU/disk/network/payload cost.
         if (BakedLightmapStandardConverter.AdditiveFillStrength > 0f)
         {
             var bakedLightmapGrayTex = LightmapDecoder.GetDecodedLightmap(sceneGuid, lightmapIndex, lightmapData.lightmapColor, desaturate: true);

@@ -1,39 +1,18 @@
 // BakeryPresenceDefine.cs
 //
-// ダイダロス作 — Bakery導入有無を自動検出し、`BAKERY_INCLUDED` スクリプティング定義
-// シンボルを管理するブートストラップ。LightmapTestHarness.cs / BakeryTempObjectSuppression.cs
-// の `#if BAKERY_INCLUDED` ガードはこのシンボルを前提にしている。
+// Detects whether Bakery is installed and keeps the "BAKERY_INCLUDED" scripting define
+// symbol in sync. LightmapTestHarness.cs and BakeryTempObjectSuppression.cs gate their
+// Bakery-only code behind `#if BAKERY_INCLUDED`.
 //
-// ⚠ 本ファイル自体は Bakery型を一切直接参照しない（#if の外側に常に置かれ、Bakery導入有無に
-// 関わらず毎回コンパイルされる必要があるため）。検出は AppDomain.CurrentDomain.GetAssemblies()
-// を走査し、型 "ftRenderLightmap"（Bakery導入時の実在確認済み型: 名前空間なし。
-// Assets/Editor/x64/Bakery/scripts/ftRenderLightmap.cs — LightmapTestHarness.cs の header
-// comment 参照）を `asm.GetType("ftRenderLightmap")` の文字列名探索でのみ検出する。
-// `typeof(ftRenderLightmap)` のような直接参照は絶対に使わない。
+// This file must compile whether or not Bakery is present, so it never references a
+// Bakery type directly (no `typeof(ftRenderLightmap)`). Detection instead does a
+// string-name type lookup ("ftRenderLightmap") across all loaded assemblies.
 //
-// --- スクリプティング定義シンボルAPI（実物確認済み）---
-// Unity 2022.3.22f1 の UnityEditor.CoreModule.dll を ikdasm
-// (Editor/Data/MonoBleedingEdge/lib/mono/4.5/ikdasm.exe) で逆アセンブルし、以下を確認した:
-//   EditorUserBuildSettings.selectedBuildTargetGroup
-//     .property public static, get_selectedBuildTargetGroup() は "public hidebysig
-//     specialname static" — 外部アセンブリから直接呼べる。
-//     （対照的に activeBuildTargetGroup の getter は "assembly"(=internal) 可視性のため
-//     不可 — 実際に確認して除外した。）
-//   NamedBuildTarget.FromBuildTargetGroup(BuildTargetGroup)
-//     "public hidebysig static" — 外部アセンブリから直接呼べる。
-//   PlayerSettings.GetScriptingDefineSymbols(NamedBuildTarget, out string[] defines)
-//     "public hidebysig static void" — 外部アセンブリから直接呼べる。
-//   PlayerSettings.SetScriptingDefineSymbols(NamedBuildTarget, string[] defines)
-//     "public hidebysig static void" — 外部アセンブリから直接呼べる。
-// 旧 API (...ForGroup(BuildTargetGroup) 系) も存在し使用可能だが、2022.3での正規の
-// (非-ForGroup) API がそのまま使えることを確認済みのためこちらを採用した。
+// Uses the current (non-"...ForGroup") NamedBuildTarget-based scripting define API.
 //
-// --- 差分がある時だけSetする（無限リコンパイル防止）---
-// 現在のシンボル配列に "BAKERY_INCLUDED" が含まれているか否かと検出結果を比較し、
-// 一致していれば PlayerSettings.SetScriptingDefineSymbols を一切呼ばない。
-// SetScriptingDefineSymbols は実際に値が変わった時のみスクリプト再コンパイルを
-// トリガーするため、これにより「毎エディタ起動/毎ドメインリロードで無限に
-// リコンパイルが走る」事態を防ぐ。
+// SetScriptingDefineSymbols only triggers a recompile when the value actually changes,
+// so this only calls it when the define's current state doesn't already match
+// detection — otherwise every domain reload would trigger another recompile.
 using System;
 using System.Linq;
 using UnityEditor;
@@ -45,9 +24,7 @@ static class BakeryPresenceDefine
 {
     const string Symbol = "BAKERY_INCLUDED";
 
-    // Bakeryの型名。文字列のみで保持し、コード中のどこにも typeof(ftRenderLightmap) の
-    // ような直接参照を書かない（このファイル自体がBakery非導入環境でも常にコンパイル
-    // される前提のため）。
+    // Kept as a string only — see file header for why this can't be typeof(ftRenderLightmap).
     const string BakeryProbeTypeName = "ftRenderLightmap";
 
     static BakeryPresenceDefine()
@@ -77,10 +54,6 @@ static class BakeryPresenceDefine
             $"for '{namedTarget.TargetName}'. Recompiling...");
     }
 
-    // Purely a string-name type lookup across already-loaded assemblies — never
-    // `typeof(ftRenderLightmap)`. This is the one method in the whole Bakery-optional
-    // codebase that must compile identically whether or not Bakery is installed, by
-    // construction (it IS the detector), so it cannot reference the Bakery type directly.
     static bool DetectBakeryPresent()
     {
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())

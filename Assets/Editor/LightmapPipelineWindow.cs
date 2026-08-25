@@ -1,114 +1,83 @@
 // LightmapPipelineWindow.cs
 //
-// ライトマップパイプライン操作パネル。「品質プリセット選択→ベイク→自動送信」を
-// ワンボタン化する便利UI。
+// One-button "pick a quality preset -> bake -> send" panel.
 //
-// メニュー: "Resonite SDK/Lightmap Pipeline"
+// Menu: "Resonite SDK/Lightmap Bake & Send"
 //
-// これは意図的に薄いUI層である。ベイク/変換のロジックは一切ここに置かず、すべて
-// LightmapTestHarness.cs 側の public static メソッド/プロパティを呼ぶだけに徹する
-// （ロジック重複禁止の要件）。可視性が必要だった箇所は LightmapTestHarness.cs 側の
-// メソッドを public に上げて対応した（BuildScene / StartBake / StartBakeUnity /
-// ConvertUnityLightsToBakeryLights / RunPipeline / IsBakeInProgress /
-// GetSdkConnectionStatusText / ReadResultLogTail）。
+// Deliberately a thin UI layer: no bake/convert logic lives here, only calls into
+// LightmapTestHarness.cs's public static methods/properties (no duplicated logic).
 //
-// レイアウト（上から）:
-//   Language / 言語   -> 言語セレクタ（最上部・常時操作可）。詳細は下記「言語切替」参照。
-//   対象シーン (Target Scene) -> Popup2択（既定=現在開いているシーン / テスト部屋）。
-//                          ダイダロス追加分・2026-07-12。詳細は下記「対象シーン選択」参照。
-//                          DrawSceneTargetSelector() 参照。
-//   Baker              -> トグル2個（Bakery / Unity Standard）。BakeryAvailable==false
-//                          （BAKERY_INCLUDED未定義=Bakery非導入）のときは "Bakery" トグルを
-//                          常に表示したまま無効化+ラベルを「Bakery（要導入）」に変更（隠さ
-//                          ない — 買えば使えると分かるUXが要件）。DrawBakerSelector() 参照。
-//   Quality Preset     -> low/mid/high/custom（1つだけ。customのときだけベイカー別の詳細
-//                          数値フィールドを表示 — 元からある挙動、そのまま）
-//   Lighting セクション -> Baker==UnityStandard のときだけ表示。つまみ5個＋実験的チェック
-//                          ボックス1個（下記表）
-//   送信時オプション   -> どちらのBakerでも常時表示。Force Refresh Generated Lightmaps /
-//                          Send Tonemap Compensation（旧・Resonite SDKパネルにあった非vanilla
-//                          トグル2個を移設）。DrawSendTimeOptionsSection()参照。
-//   送信時ライト調整   -> どちらのBakerでも常時表示（ResoniteSDK/LightTuning.csの
-//                          IntensityCeiling/WhiteBalanceShiftを直接編集。ベイク結果自体では
-//                          なく変換/送信時にのみ効く値のためBaker非依存）。
-//                          DrawSendTimeLightTuningSection()参照。
-//   ベイクライトマップ露出 -> どちらのBakerでも常時表示（ResoniteSDK/LightmapDecoder.csの
-//                          RangeScale/ColorSaturationCompensationを直接編集。焼きデータの
-//                          明るさはシーンごとに違うため部屋を変えたら要調整）。
-//                          DrawBakedLightmapExposureSection()参照。
-//   [Convert Lights]   -> Baker==Bakery のときだけ表示（Unity Standard時は非表示）
-//   [Bake] [Bake & Send] の1列のみ
-//   Debug / Cleanup    -> どちらのBakerでも常時表示。旧ResoniteSDKDebugWindow.cs（メニュー
-//                          "Resonite SDK/Open Debug Tools"）を統廃合してここへ移設（旧パネルは
-//                          Lightmap Pipelineと冗長だったため廃止）。Send Meshes/Materials/
-//                          Lightmaps Only（部分送信）・Retry Missing Asset URLs・
-//                          Log Messages JSON・Reset conversion state・Clear Generated Lightmap
-//                          Variantsの6点。「Cleanup converters in the scene」と「Cleanup
-//                          Resonite Components in the scene」の2ボタンは移設せず削除した
-//                          （前者はResetConversionState()が内部でCleanupConverters()を呼ぶため
-//                          常にResetで代替可能、後者はResoniteLinkWindow
-//                          .ResetConversionState()のコメントが明記する通りそもそも完全に
-//                          冗長で二重破棄警告の原因だった）。DrawDebugCleanupSection()参照。
+// Layout (top to bottom):
+//   Language selector (always available) - see DrawLanguageSelector()
+//   Target Scene popup (current scene / test room) - DrawSceneTargetSelector()
+//   Baker toggle (Bakery / Unity Standard) - DrawBakerSelector(). If Bakery isn't installed,
+//     its toggle stays visible but disabled, labeled "Bakery (not installed)"
+//   Quality Preset (low/mid/high/custom) - custom reveals per-baker numeric fields
+//   Lighting section - Unity Standard baker only, 5 knobs + 1 experimental checkbox
+//   Send-Time Options - always shown (Force Refresh Generated Lightmaps / Send Tonemap
+//     Compensation, moved here from the main SDK panel since they're overlay additions)
+//   Send-Time Light Tuning - always shown (LightTuning.IntensityCeiling; applies at
+//     conversion/send time, not bake time, so it's baker-independent)
+//   Baked Lightmap Exposure - always shown (LightmapDecoder.RangeScale/
+//     ColorSaturationCompensation; a bake's brightness varies per scene)
+//   [Convert Lights] - Bakery baker only
+//   [Bake] [Bake & Send]
+//   Debug / Cleanup - always shown. Send Meshes/Materials/Lightmaps Only (partial sends),
+//     Retry Missing Asset URLs, Log Messages JSON - see DrawDebugCleanupSection()
 //   Status / Result Log
 //
-// つまみ5個は Baker==UnityStandard 専用（Bakeryは BakerySkyLight 等ambient設計が全く別物
-// のため対象外 — LightmapTestHarness.BuildLights()の header comment 参照）。ボタンに
-// つまみのシーン適用を内包する設計（「Apply」単独ボタンは存在しない）:
+// The 5 knobs below are Unity Standard baker only (Bakery uses a completely separate
+// ambient model via BakerySkyLight and never reads RenderSettings.ambient* — see
+// LightmapTestHarness.BuildLights()'s header comment). Applying them to the scene is
+// folded into the Bake/Bake & Send buttons themselves; there is no separate "Apply" button.
 //
-// つまみ対応表（すべて実ソース/ildasm確認済み。詳細は各フィールドのコメント参照）:
-//   Shadow Strength     -> UnityEngine.Light.shadowStrength（shadows==NoneならSoftに強制）
+// Knob -> underlying API:
+//   Shadow Strength     -> UnityEngine.Light.shadowStrength (forced to Soft if shadows==None)
 //   Ambient Brightness  -> RenderSettings.ambientLight = Ambient Color * brightness
-//   Ambient Color       -> 同上（ambientMode=Flat に固定）
-//   Sun Color           -> UnityEngine.Light.color（主ディレクショナルライト）
+//   Ambient Color       -> same (ambientMode locked to Flat)
+//   Sun Color           -> UnityEngine.Light.color (main directional light)
 //   Sun Angle           -> transform.rotation = Quaternion.Euler(elevation, azimuth, 0)
 //
-// ボタン対応表:
-//   Convert Lights (Bakery選択時のみ表示) -> LightmapTestHarness.ConvertUnityLightsToBakeryLights()
-//   Bake         -> Baker==UnityStandardならまずApplyTuningToScene(sun)でつまみ適用(Undo記録)
-//                   -> LightmapTestHarness.StartBake(...) / StartBakeUnity(...)
-//                   （ベイカー選択に応じてどちらか一方。auto-convertなし。どちらも
-//                   useCurrentSceneInsteadOfTestRoom引数に「対象シーン」選択を渡す
-//                   — RunBakeOnly()参照）
-//   Bake & Send  -> 同様にApplyTuningToScene(sun)を先に適用 ->
-//                   LightmapTestHarness.RunPipeline(quality, baker, bakeNormalDetail, useCurrentScene)
-//                   （ベイク完了イベントで自動convertまで実行。harness既存のpipelineチェーン
-//                   をそのまま使う — 独自のbakeCompleted購読はここでは持たない）
+// Button -> action:
+//   Convert Lights (Bakery only) -> LightmapTestHarness.ConvertUnityLightsToBakeryLights()
+//   Bake         -> for Unity Standard, applies the knobs via ApplyTuningToScene(sun) (Undo
+//                   recorded) first, then calls StartBake(...)/StartBakeUnity(...) depending
+//                   on the selected baker. No auto-convert. Target-scene choice is passed
+//                   through as the useCurrentSceneInsteadOfTestRoom argument — see
+//                   RunBakeOnly().
+//   Bake & Send  -> same tuning-apply step, then
+//                   LightmapTestHarness.RunPipeline(quality, baker, bakeNormalDetail, useCurrentScene),
+//                   which auto-converts on the harness's own bake-completed event (no separate
+//                   subscription needed here).
 //
-// --- ツールチップ（ダイダロス追加分）-------------------------------------------------
-// 全コントロールを GUIContent(label, tooltip) 化してホバー説明を出す。文言は Tooltip*
-// 定数にまとめてあり、指示された文言をそのまま使用（改変なし）。GUIContent受け取り
-// オーバーロードの存在は UnityEditor.CoreModule.dll / UnityEngine.IMGUIModule.dll を
-// ikdasmで逆アセンブルして実物確認済み（Popup/Slider/ColorField/Vector2Field/
-// FloatField/IntField/LabelField は GUIContentオーバーロードあり、GUILayout.Toggle/
-// Button も GUIContentオーバーロードあり）。
+// --- Tooltips -------------------------------------------------------------------------
+// Every control is wrapped in GUIContent(label, tooltip) for hover text; strings live in
+// the Tooltip* constants below.
 //
-// --- 「法線を焼き込む」チェックボックス（実装範囲は正直に）---------------------------
-// Lighting セクションに追加。OFF→ON切り替え時に EditorUtility.DisplayDialog で実験的機能
-// である旨の確認を取る（Cancelならfalseに戻す）。
+// --- "Bake normal detail into lightmap" checkbox ---------------------------------------
+// Added to the Lighting section. An OFF->ON toggle asks for confirmation via
+// EditorUtility.DisplayDialog, since it's experimental (Cancel reverts to false).
 //
-// ⚠ 現状の実装範囲（できる範囲／できない範囲を明記・2026-07-11 Step1+2実装後に更新）:
-//   - できる範囲（実装済み）:
-//     ・チェック状態の保持＋OFF→ON確認ダイアログ＋説明表示（本ファイル内で完結）。
-//     ・Step 1: 委譲値が RunBakeOnly()/RunBakeAndSend() から
-//       LightmapTestHarness.StartBakeUnity(..., bakeNormalDetail) / RunPipeline(..., bool) に
-//       配線済み。ONのとき LightingSettings.directionalityMode = LightmapsMode.
-//       CombinedDirectional（OFFのときは明示的に NonDirectional）でベイクされる。
-//     ・Step 2: SDKフォーク側（Resonite.UnitySDK の LightmapMaterialCache /
-//       DirectionalLightmapBaker、Assets/ResoniteSDK/ComponentConverters/Unity Core/
-//       Rendering/ 配下）が、変換時に LightmapData.lightmapDir が非nullのレンダラーを検出
-//       すると、メッシュの頂点法線をライトマップUV(UV2)空間にラスタライズした「法線パッチ」
-//       と comp_dir/comp_color を UnityCG.cginc の DecodeDirectionalLightmap 式で合成した
-//       per-objectテクスチャを生成し、既存の _BakedLightmap/SecondaryAlbedo 経路へ流し込む。
-//       このウィンドウ自身はそのSDK側処理を一切呼ばない（ConvertはあくまでSendCurrentScene
-//       経由・SDK側が焼かれたデータを見て自律的に分岐する設計）。
-//   - できない範囲（未実装・「第2段階」として別タスク）:
-//     ・タンジェント空間のノーマルマップ（法線テクスチャ）自体のサンプリングは行わない。
-//       今回焼き込まれるのは「メッシュの頂点(ジオメトリ)法線」由来の陰影のみ — マテリアル
-//       のノーマルマップの凹凸そのものはまだ反映されない。
-//     ・UVアイランドの外側（パディング/ガター領域）の色にじみ対策（dilate）は未実装 —
-//       境界にシームが出る可能性がある。
-//   - 実機でのベイク結果・Resonite側の見た目は未検証（本セッションはコンパイル成立と
-//     ロジックの正しさまで。実機確認はアテナ＋Tanossy）。
+// What it does:
+//   - Tracks the checked state and gates OFF->ON behind the confirmation dialog above.
+//   - The committed value flows through to LightmapTestHarness.StartBakeUnity(...,
+//     bakeNormalDetail) / RunPipeline(..., bool), which sets
+//     LightingSettings.directionalityMode to CombinedDirectional when on (explicitly
+//     NonDirectional when off).
+//   - On the SDK fork side (LightmapMaterialCache / DirectionalLightmapBaker, under
+//     Assets/ResoniteSDK/ComponentConverters/Unity Core/Rendering/), a renderer whose
+//     LightmapData.lightmapDir is non-null at conversion time gets its vertex normals
+//     rasterized into lightmap UV (UV2) space as a "normal patch", combined with
+//     comp_dir/comp_color via the DecodeDirectionalLightmap formula from UnityCG.cginc,
+//     into a per-object texture that feeds the existing _BakedLightmap/SecondaryAlbedo
+//     path. This window never calls that SDK-side code itself — Convert just goes through
+//     SendCurrentScene, and the SDK fork branches on its own based on the baked data.
+// What it does NOT do:
+//   - No tangent-space normal map (texture) sampling — only shading from the mesh's
+//     vertex/geometry normals gets baked in; normal-map surface detail is still flattened.
+//   - No dilate/padding fix for UV island edges, so seams can appear at boundaries.
+//
+// Real-machine bake results and in-Resonite appearance are unverified.
 using System;
 using System.Reflection;
 using UnityEditor;
@@ -120,8 +89,8 @@ public class LightmapPipelineWindow : EditorWindow
     // Whether the Bakery baker option should be selectable. Mirrors BAKERY_INCLUDED (see
     // BakeryPresenceDefine.cs, which owns that symbol) so this window can compile and run
     // identically with or without Bakery installed — the Bakery toggle button is always
-    // SHOWN (never hidden), just disabled + relabeled when unavailable, per spec ("買えば
-    // 使えると分かるUX"). LightBaker enum itself has no Bakery dependency (see its own
+    // SHOWN (never hidden), just disabled + relabeled when unavailable, so users can see what
+    // installing Bakery would unlock. LightBaker enum itself has no Bakery dependency (see its own
     // declaration in LightmapTestHarness.cs), so it's safe to keep both enum values
     // regardless of this constant.
 #if BAKERY_INCLUDED
@@ -130,15 +99,13 @@ public class LightmapPipelineWindow : EditorWindow
     const bool BakeryAvailable = false;
 #endif
 
-    // --- 言語切替（ダイダロス追加分）----------------------------------------------------
+    // --- Language switching -------------------------------------------------------------
     //
-    // 全ユーザー可視文字列は L(ja, en) を経由する軽量ローカライズ（フルローカライズ基盤は
-    // 導入しない、という指示どおり）。EditorPrefs（キー "ResoLightbake.Lang"）で永続化 —
-    // GetString/SetString の存在は UnityEditor.CoreModule.dll を ikdasm で確認済み
-    // (public hidebysig static)。既定値は初回起動時のみ Application.systemLanguage で判定
-    // （SystemLanguage.JapaneseならJapanese、それ以外はEnglish — Application.systemLanguage
-    // が public static get property であることも同ildasm確認内で確認済み）。以後は
-    // ユーザーが選んだ言語を毎回そのまま復元する。
+    // All user-visible strings go through the lightweight L(ja, en) helper (no full
+    // localization framework, by design). Persisted via EditorPrefs under "ResoLightbake.Lang".
+    // The default is decided once, on first launch, from Application.systemLanguage
+    // (Japanese if SystemLanguage.Japanese, English otherwise); after that, whatever the
+    // user picks is restored every time.
     enum UiLang { Japanese, English }
 
     const string LangPrefKey = "ResoLightbake.Lang";
@@ -147,13 +114,13 @@ public class LightmapPipelineWindow : EditorWindow
 
     string L(string ja, string en) => _lang == UiLang.Japanese ? ja : en;
 
-    // --- 対象シーン選択（ダイダロス追加分・2026-07-12）--------------------------------------
+    // --- Target scene selection ----------------------------------------------------------
     //
-    // 背景: 従来はBake/Bake&Send共通でLightmapTestHarness.EnsureTestSceneOpen()が問答無用で
-    // Assets/LightmapTest.unityへ強制的に開き直していた。本番規模のワールド（実際に開いて
-    // いる別シーン）でベイクしようとしても、テスト部屋へ引き戻されてしまう実害があったため
-    // 選択式にする。既定値は CurrentOpenScene（実運用を主、回帰テストを従にする）— 言語設定
-    // (LangPrefKey)と同じ EditorPrefs 文字列パターンで永続化。
+    // Bake/Bake & Send used to always force the scene open via
+    // LightmapTestHarness.EnsureTestSceneOpen(), pulling the user back to
+    // Assets/LightmapTest.unity even when baking a real, larger scene. This selector fixes
+    // that. Default is CurrentOpenScene (real work takes priority over regression testing);
+    // persisted via EditorPrefs, same string-pref pattern as the language setting.
     enum SceneTarget { CurrentOpenScene, TestRoom }
 
     const string SceneTargetPrefKey = "ResoLightbake.SceneTarget";
@@ -180,7 +147,6 @@ public class LightmapPipelineWindow : EditorWindow
 
     static readonly string[] QualityKeys = { "low", "mid", "high", "custom" };
 
-    // --- ツールチップ文言（指示どおり、改変なし）----------------------------------------
     const string TooltipBakerJA = "使用するライトベイカー。Unity Standard=Unity標準ライトマッパー。Bakery=別途Bakeryアセットが必要（未導入時はグレーアウト）";
     const string TooltipBakerEN = "Lightmap baker. Unity Standard = Unity's built-in lightmapper. Bakery = requires the Bakery asset (greyed out if not installed).";
 
@@ -220,7 +186,6 @@ public class LightmapPipelineWindow : EditorWindow
     const string TooltipConvertLightsJA = "UnityライトをBakery用ライトに変換（Bakery経路専用）";
     const string TooltipConvertLightsEN = "Convert Unity lights to Bakery lights (Bakery path only).";
 
-    // --- 「法線を焼き込む」チェックボックス文言（指示どおり、改変なし）------------------
     const string NormalBakeLabelJA = "法線を焼き込む（実験的）";
     const string NormalBakeLabelEN = "Bake normal detail into lightmap (experimental)";
 
@@ -239,7 +204,6 @@ public class LightmapPipelineWindow : EditorWindow
     const string NormalBakeDialogCancelJA = "やめる";
     const string NormalBakeDialogCancelEN = "Cancel";
 
-    // --- その他のHelpBox/注記文言 --------------------------------------------------------
     const string BakeryUnavailableNoteJA = "Bakeryを導入すると選択可能になります。";
     const string BakeryUnavailableNoteEN = "Install Bakery to enable this option.";
 
@@ -281,7 +245,7 @@ public class LightmapPipelineWindow : EditorWindow
     Vector2 _sunAngle = new Vector2(35f, -30f);
 
     // "Bake normal detail into lightmap (experimental)" — see the header comment block's
-    // "できる範囲／できない範囲" note. Committed value only ever changes via
+    // "What it does / does not do" note. Committed value only ever changes via
     // DrawLightingSection()'s OFF->ON confirmation-dialog gate below; comparing this
     // (last-committed) value against the Toggle's return value each frame is what detects
     // the OFF->ON transition, so no separate "previous value" field is needed.
@@ -297,16 +261,12 @@ public class LightmapPipelineWindow : EditorWindow
     // pattern DrawLightingSection() already uses for its own knobs) so the values are
     // editable from this panel instead of requiring a code edit.
     float _lightIntensityCeiling = 0.9f;
-    float _lightWhiteBalanceShift = 0.55f;
 
     const string SendTimeTuningHeaderJA = "送信時ライト調整";
     const string SendTimeTuningHeaderEN = "Send-Time Light Tuning";
 
     const string TooltipIntensityCeilingJA = "シーン内で最も明るいライトが送信時にこの値になるよう、全ライトへ同じ比率で倍率を逆算する（固定倍率ではなくシーンごとに自動正規化）";
     const string TooltipIntensityCeilingEN = "Target intensity for the scene's single brightest light at send time; every light is scaled by the same ratio needed to put the brightest one exactly here (self-normalizing per scene, not a fixed multiplier).";
-
-    const string TooltipWhiteBalanceShiftJA = "光源色を送信時だけ白側へブレンドする（0=元の色のまま、1=純白）";
-    const string TooltipWhiteBalanceShiftEN = "Blends each light's color toward white at send time (0 = unchanged, 1 = pure white).";
 
     // --- Send-Time Options section state --------------------------------------------------
     //
@@ -353,25 +313,16 @@ public class LightmapPipelineWindow : EditorWindow
 
     // --- Debug / Cleanup section state ----------------------------------------------------
     //
-    // Folded in from the now-deleted ResoniteSDKDebugWindow.cs (menu: "Resonite SDK/Open Debug
-    // Tools") - having a separate Debug Tools window alongside this one was redundant. Everything
-    // here is a thin call into LightmapTestHarness.cs's public static members
-    // (RetryMissingAssetURLs() / ResetConversionState() / LogMessageJSON /
-    // ClearGeneratedLightmapVariants()), same no-logic-in-the-GUI-layer rule the rest of this
-    // file follows - see that file's own additions for what each one actually does and why it's
-    // safe to consolidate.
+    // Thin calls into LightmapTestHarness's public static members, same no-logic-in-the-GUI
+    // rule the rest of this file follows.
     //
-    // "Send Meshes/Materials Only" buttons already existed lower in this file before this
-    // section was added; "Send Lightmaps Only" is the new third button that fills the gap
-    // (LightmapTestHarness.ConvertLightmapsOnly() already existed as a receiver, it just had no
-    // button anywhere - see LightmapTestHarness.cs's file-driven "lightmaps_only" command).
-    //
-    // Deliberately NOT included here (see the header comment's Debug/Cleanup bullet for the full
-    // reasoning): "Cleanup converters in the scene" (subsumed by Reset Conversion State, which
-    // already calls CleanupConverters() internally - see
-    // ResoniteLinkWindow.ResetConversionState()) and "Cleanup Resonite Components in the scene"
-    // (found to be entirely redundant and a source of double-destroy warnings per that same
-    // method's own comment, independent of whether Reset is used).
+    // Deliberately NOT included: "Cleanup converters/Resonite Components in the scene"
+    // (subsumed by ResoniteLinkWindow.ResetConversionState()); a manual "Reset Conversion
+    // State" button (EnsureConverter() already self-heals whenever the session/port changes
+    // or IsCorrupted is set — exactly what a timeout or mid-send disconnect triggers); and a
+    // manual "Clear Generated Lightmap Variants" button (SceneConverter.ConvertScene()
+    // already calls LightmapMaterialCache.ClearGeneratedLightmapVariants() whenever "Force
+    // Refresh Generated Lightmaps" is on).
     const string DebugCleanupHeaderJA = "デバッグ / クリーンアップ";
     const string DebugCleanupHeaderEN = "Debug / Cleanup";
 
@@ -394,24 +345,13 @@ public class LightmapPipelineWindow : EditorWindow
     const string TooltipLogMessageJSONJA = "ResoniteLinkの送受信メッセージをJSONとしてログへ出力する（デバッグ用）";
     const string TooltipLogMessageJSONEN = "Log ResoniteLink send/receive messages as JSON (for debugging).";
 
-    // SceneConverter.EnsureConverter() already auto-resets whenever the session ID or port
-    // actually changes, so a normal healthy send never needs this pressed manually. It's a
-    // recovery step for the case auto-detection can't catch - the session/port stayed the same
-    // but something got stuck anyway (e.g. after the 60-second AssetConverter.cs timeout, or a
-    // WebSocket disconnect mid-send) - not something to run routinely.
-    const string TooltipResetConversionStateJA = "シーン内のコンバータと変換ルート(__UnityAssets/__UnitySkybox)を破棄し、変換状態を最初からやり直す。セッションID/ポートが変わった時は自動でリセットされるため、通常の送信では不要。タイムアウトやWebSocket切断など、自動検知できない形で状態が壊れた時にだけ押す（部分送信ボタン群はResetとは独立した「一部だけ直す」用途なのでResetでは代替されない）";
-    const string TooltipResetConversionStateEN = "Destroys the scene's converters and conversion roots (__UnityAssets/__UnitySkybox) and starts the conversion state fresh. A normal send doesn't need this - EnsureConverter() already resets automatically whenever the session/port changes. Press it when something breaks in a way that auto-detection can't catch (e.g. a timeout or WebSocket disconnect mid-send), not routinely (the partial-send buttons above serve a separate \"fix just one part\" use case that Reset does not replace).";
-
-    const string TooltipClearGeneratedLightmapVariantsJA = "Unity側に生成済みのライトマップ差分アセット(.matファイル等、Assets/ResoniteSDK/Generated/LightmapVariants)を削除する。変換状態リセットとは別軸（Resonite側の変換状態ではなくUnity側のローカル生成物）なのでResetでは代替されない";
-    const string TooltipClearGeneratedLightmapVariantsEN = "Deletes the generated lightmap variant assets on the Unity side (.mat files etc. under Assets/ResoniteSDK/Generated/LightmapVariants). Independent from Reset Conversion State (this clears local Unity-side generated assets, not Resonite-side conversion state), so Reset does not replace it.";
-
     // Cached via reflection the first time it's needed; see GetRenderSettingsObjectForUndo().
     static MethodInfo _getRenderSettingsMethod;
 
-    [MenuItem("Resonite SDK/Lightmap Pipeline")]
+    [MenuItem("Resonite SDK/Lightmap Bake & Send")]
     static void ShowWindow()
     {
-        var window = GetWindow<LightmapPipelineWindow>("Lightmap Pipeline");
+        var window = GetWindow<LightmapPipelineWindow>("Lightmap Bake & Send");
         window.minSize = new Vector2(360f, 420f);
     }
 
@@ -768,20 +708,9 @@ public class LightmapPipelineWindow : EditorWindow
         ToneMapCompensationState.Enabled = _sendToneMapCompensation;
     }
 
-    // ------------------------------------------------------------------
-    // Send-Time Light Tuning section — see the field-block comment above (near
-    // _lightIntensityCeiling/_lightWhiteBalanceShift) for why this is drawn unconditionally
-    // (both bakers) rather than only for LightBaker.UnityStandard like DrawLightingSection().
-    // No "Apply" button here either — the values are synced straight into
-    // LightTuning's static fields on every OnGUI call, so they take effect on whatever the
-    // next Send Current Scene/Bake & Send actually does, without needing a scene edit first.
-    // ------------------------------------------------------------------
-
-    // Defaults the "Reset to Defaults" button below restores - kept as named constants (rather
-    // than repeating the field initializers' literals inline at the button call site) so the
-    // two stay in sync if either default is ever re-tuned again.
+    // Send-Time Light Tuning section: drawn for both bakers (applies at conversion/send time,
+    // not bake time). Values sync straight into LightTuning's static field every OnGUI call.
     const float DefaultLightIntensityCeiling = 0.9f;
-    const float DefaultLightWhiteBalanceShift = 0.55f;
 
     void DrawSendTimeLightTuningSection(bool baking)
     {
@@ -793,24 +722,14 @@ public class LightmapPipelineWindow : EditorWindow
             new GUIContent(L("明るさの上限", "Intensity Ceiling"), L(TooltipIntensityCeilingJA, TooltipIntensityCeilingEN)),
             _lightIntensityCeiling, 0.1f, 3f);
 
-        _lightWhiteBalanceShift = EditorGUILayout.Slider(
-            new GUIContent(L("白色寄せ", "White Balance Shift"), L(TooltipWhiteBalanceShiftJA, TooltipWhiteBalanceShiftEN)),
-            _lightWhiteBalanceShift, 0f, 1f);
-
-        // Restores both sliders to the tuned defaults above, not to some neutral/no-op value -
-        // these two were arrived at through several rounds of live-tuning earlier (see
-        // LightTuning.cs's own field comments), so "reset" here means "back to the last known
-        // good values", the same way undoing an accidental drag would.
         if (GUILayout.Button(new GUIContent(L("既定値に戻す", "Reset to Defaults"), L(
-            "明るさの上限・白色寄せを、実機で調整済みの既定値に戻す",
-            "Restores Intensity Ceiling and White Balance Shift to their real-machine-tuned default values."))))
+            "明るさの上限を、実機で調整済みの既定値に戻す",
+            "Restores Intensity Ceiling to its tuned default value."))))
         {
             _lightIntensityCeiling = DefaultLightIntensityCeiling;
-            _lightWhiteBalanceShift = DefaultLightWhiteBalanceShift;
         }
 
         LightTuning.IntensityCeiling = _lightIntensityCeiling;
-        LightTuning.WhiteBalanceShift = _lightWhiteBalanceShift;
     }
 
     // ------------------------------------------------------------------
@@ -855,10 +774,8 @@ public class LightmapPipelineWindow : EditorWindow
     {
         EditorGUILayout.LabelField(L(DebugCleanupHeaderJA, DebugCleanupHeaderEN), EditorStyles.boldLabel);
 
-        // Partial sends: same "not gated on SDK connection state, the harness call just logs a
-        // failure to the Result Log if disconnected" behavior "Send Meshes/Materials Only"
-        // already had before this section existed — kept identical rather than adding a new
-        // connection check here.
+        // Partial sends aren't gated on SDK connection state; the harness call just logs a
+        // failure to the Result Log if disconnected.
         GUI.enabled = !baking;
 
         EditorGUILayout.BeginHorizontal();
@@ -880,22 +797,10 @@ public class LightmapPipelineWindow : EditorWindow
         LightmapTestHarness.LogMessageJSON = EditorGUILayout.Toggle(
             new GUIContent(L("メッセージJSONをログ出力", "Log Messages JSON"), L(TooltipLogMessageJSONJA, TooltipLogMessageJSONEN)),
             LightmapTestHarness.LogMessageJSON);
-
-        if (GUILayout.Button(new GUIContent(L("変換状態をリセット", "Reset Conversion State"), L(TooltipResetConversionStateJA, TooltipResetConversionStateEN))))
-            LightmapTestHarness.ResetConversionState();
-
-        // Purely local to the Unity project (deletes generated .mat/.png assets on disk) — needs
-        // neither an SDK connection nor "not currently baking" to run safely, same rationale
-        // ResoniteSDKDebugWindow.cs's original button had for resetting GUI.enabled to true
-        // just for this one. Kept enabled even mid-bake.
-        GUI.enabled = true;
-
-        if (GUILayout.Button(new GUIContent(L("生成済みライトマップ差分を削除", "Clear Generated Lightmap Variants"), L(TooltipClearGeneratedLightmapVariantsJA, TooltipClearGeneratedLightmapVariantsEN))))
-            LightmapTestHarness.ClearGeneratedLightmapVariants();
     }
 
     // "Bake normal detail into lightmap (experimental)" — see the file header comment's
-    // "できる範囲／できない範囲" note for exactly what this control does and does not do.
+    // "What it does / does not do" note for exactly what this control does and does not do.
     // Interactive (not GUI.enabled=false) because an OFF->ON transition must be able to
     // trigger the confirmation dialog below. As of the Step 1/2 wiring, this *committed* bool
     // value IS read: RunBakeOnly()/RunBakeAndSend() pass it straight through to
@@ -1064,10 +969,8 @@ public class LightmapPipelineWindow : EditorWindow
         else
         {
             ApplyTuningToScene(sun);
-            // _bakeNormalDetail's committed value is now actually read (see the file header
-            // comment's updated "できる範囲/できない範囲" note) - wired straight through to
-            // StartBakeUnity()'s bakeNormalDetail parameter, which sets
-            // LightingSettings.directionalityMode accordingly.
+            // Wired straight through to StartBakeUnity()'s bakeNormalDetail parameter, which
+            // sets LightingSettings.directionalityMode accordingly.
             LightmapTestHarness.StartBakeUnity(quality.UnityLightmapResolution, quality.UnityDirectSampleCount, quality.UnityIndirectSampleCount, _bakeNormalDetail, useCurrentScene);
         }
     }

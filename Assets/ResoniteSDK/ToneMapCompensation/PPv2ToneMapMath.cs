@@ -1,33 +1,26 @@
 using UnityEngine;
 using UnityEngine.Rendering.PostProcessing;
 
-// Resonite (Renderite) does not apply any ColorGrading-equivalent post-processing on the main camera
-// (verified directly in Renderite.Unity.Renderer: CameraPostprocessingManager.cs explicitly skips
-// ColorGrading items on the primary camera). Because Unity's PPv2 color grading / tonemapping effect
-// is never applied on the Resonite side, highlights (reflections, glare, etc.) come through raw and
-// look "harsh".
+// Resonite (Renderite) applies no ColorGrading-equivalent post-processing on the main camera
+// (confirmed in Renderite.Unity.Renderer: CameraPostprocessingManager.cs skips ColorGrading items on
+// the primary camera), so Unity's PPv2 color grading/tonemap never reaches the Resonite side and
+// highlights come through raw/harsh. There's no ResoniteLink ImportTexture3D (only
+// ImportTexture2D/ImportCubemap/ImportMesh/ImportAudioClip), so baking the tonemap curve into a 3D
+// LUT and applying it via Resonite's LUT Material isn't possible. Instead this reproduces Unity's
+// PPv2 formulas directly, applied separately to material colors (ColorGradingApproximation) and
+// Reflection Probe intensity (ReflectionProbeConverter) as an approximation.
 //
-// Ideally Unity's tonemap curve would be baked into a 3D LUT and applied via Resonite's official LUT
-// Material, but the ResoniteLink API has no ImportTexture3D equivalent (only ImportTexture2D/
-// ImportCubemap/ImportMesh/ImportAudioClip exist), so that approach is not currently possible. As a
-// second-best option, this reproduces Unity's official PPv2 package formulas directly and applies them
-// separately to material colors (via ColorGradingApproximation) and Reflection Probe intensity (via
-// ReflectionProbeConverter) as an approximation.
+// Formulas/constants are taken directly from the com.unity.postprocessing@3.4.0 package:
+//   - PostProcessing/Shaders/Builtins/Lut3DBaker.compute (pipeline order)
+//   - PostProcessing/Shaders/Colors.hlsl (WhiteBalance / LogC / Contrast / Saturation / NeutralTonemap)
+//   - PostProcessing/Runtime/Utils/ColorUtilities.cs (temperature/tint -> _ColorBalance)
+//   - PostProcessing/Runtime/Effects/ColorGrading.cs (UI parameter -> scale conversion)
 //
-// Sources for the formulas/constants (taken directly from the com.unity.postprocessing@3.4.0 package):
-//   - PostProcessing/Shaders/Builtins/Lut3DBaker.compute (overall pipeline order)
-//   - PostProcessing/Shaders/Colors.hlsl (WhiteBalance / LogC conversion / Contrast / Saturation / NeutralTonemap)
-//   - PostProcessing/Runtime/Utils/ColorUtilities.cs (conversion from temperature/tint to the _ColorBalance vector)
-//   - PostProcessing/Runtime/Effects/ColorGrading.cs (actual scale conversion of the UI parameters)
-//
-// Limits of what is covered:
-//   - Only the gradingMode=HighDefinitionRange path with tonemapper=None/Neutral is implemented.
-//     When tonemapper=ACES is selected, an entirely separate ACEScc/ACEScg pipeline would be required,
-//     which is not supported (in that case the tonemap stage is skipped and only Contrast/Saturation/
-//     WhiteBalance are applied).
-//   - ChannelMixer, Lift/Gamma/Gain, and the Hue-related curves (HueVsHue/SatVsSat/LumVsSat) are treated
-//     as identity transforms, since production scenes were confirmed to leave them at Unity's defaults.
-//     Projects that actually edit these will see reduced approximation accuracy.
+// Coverage: only gradingMode=HighDefinitionRange with tonemapper=None/Neutral is implemented. ACES
+// uses an entirely different ACEScc/ACEScg pipeline and is not supported (tonemap stage is skipped;
+// only Contrast/Saturation/WhiteBalance apply). ChannelMixer, Lift/Gamma/Gain, and the Hue-related
+// curves (HueVsHue/SatVsSat/LumVsSat) are treated as identity transforms - scenes that actually edit
+// these will see reduced approximation accuracy.
 public static class PPv2ToneMapMath
 {
     // --- LogC (equivalent to ARRI LogC; matches the ParamsLogC constants in Colors.hlsl exactly) ---
@@ -86,12 +79,11 @@ public static class PPv2ToneMapMath
     static bool s_resolved;
     static ResolvedSettings s_settings;
 
-    // The scene's Post Processing Volume contrast slider (PPv2 UI value) converts to an actual
-    // multiplier via `value/100+1`, which for typical low slider values is close to a no-op. On the
-    // Unity side, much of the visual "punch" likely comes from other effects (Ambient Occlusion, Bloom,
-    // etc.), so mirroring the scene's PPv2 contrast setting alone does not reproduce the same impact in
-    // Resonite. This is an additional Resonite-send-only contrast coefficient multiplied into the
-    // scene's ContrastMultiplier. 1.0 = no extra effect; 1.4 is the current live-tuned value.
+    // PPv2's contrast slider maps to `value/100+1`, close to a no-op at typical low slider values -
+    // much of Unity's visual "punch" actually comes from effects Resonite has no equivalent for (AO,
+    // Bloom, etc.), so mirroring the slider alone undershoots the look. This is an extra
+    // Resonite-only coefficient multiplied into ContrastMultiplier. 1.0 = no extra effect; 1.4 is the
+    // current tuned value.
     public static float ResoniteExtraContrast = 1.4f;
 
     public static ResolvedSettings GetSettings()
@@ -220,9 +212,8 @@ public static class PPv2ToneMapMath
         return x;
     }
 
-    // A direct port of the LogGrade() -> LUT_SPACE_DECODE -> LinearGrade() -> Tonemap order from
-    // Lut3DBaker.compute, treating the HueVsHue/SatVsSat/LumVsSat curves and ChannelMixer/Lift-Gamma-Gain
-    // as identity transforms. Both input and output are colors in linear space.
+    // Ports Lut3DBaker.compute's pipeline order: LogGrade -> decode -> LinearGrade -> Tonemap.
+    // Input/output are linear-space colors.
     public static Vector3 ApplyGrading(Vector3 linearColor)
     {
         var settings = GetSettings();
@@ -247,11 +238,10 @@ public static class PPv2ToneMapMath
         return new Vector3(Mathf.Max(0f, c.x), Mathf.Max(0f, c.y), Mathf.Max(0f, c.z));
     }
 
-    // Applying ApplyGrading() in full (including Contrast) has the side effect of pushing materials
-    // with `_Color = white (1,1,1)` even further toward white via ContrastMultiplier, since values
-    // above the pivot ACEScc_MIDGRAY get pushed brighter as contrast increases — this washes out the
-    // underlying texture's original colors. This applies only Saturation on its own, preserving the
-    // scene's saturation setting without going through Contrast/WhiteBalance/Tonemap.
+    // Full ApplyGrading() would push near-white materials (_Color = white, common when the real color
+    // comes from a texture) even further toward white as ContrastMultiplier rises above the
+    // ACEScc_MIDGRAY pivot, washing out the texture. This applies Saturation only, preserving the
+    // scene's saturation setting without Contrast/WhiteBalance/Tonemap.
     public static Vector3 ApplySaturationOnly(Vector3 linearColor)
     {
         var settings = GetSettings();
@@ -262,12 +252,10 @@ public static class PPv2ToneMapMath
         return Saturation(linearColor, settings.SaturationMultiplier);
     }
 
-    // Attenuates the Reflection Probe's intensity by the actual NeutralTonemap compression ratio at a
-    // representative brightness. A single scalar coefficient cannot exactly reproduce the entire curve
-    // (since it's a nonlinear curve where low brightness is barely compressed and high brightness is
-    // compressed much more strongly), but this still produces a value grounded in the actual formula
-    // rather than applying no correction at all. The representative brightness assumes "a moderately
-    // bright reflection" and uses a linear value of 1.0.
+    // Approximates Reflection Probe intensity attenuation using the actual NeutralTonemap
+    // compression ratio at a representative brightness (linear 1.0, i.e. "a moderately bright
+    // reflection"). A single scalar can't reproduce the full nonlinear curve, but this stays grounded
+    // in the real formula rather than skipping correction entirely.
     public static float ComputeReflectionProbeCompensationFactor()
     {
         var settings = GetSettings();

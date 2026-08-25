@@ -1,23 +1,14 @@
-// Marker shader used by Resonite.UnitySDK to identify materials that should be converted
-// with a baked lightmap (Bakery/Unity Progressive Lightmapper output) folded into the
-// Resonite PBS_MultiUV_Metallic SecondaryAlbedo slot (UV1).
+// Marker shader identifying materials that should be converted with a baked lightmap folded
+// into the Resonite PBS_MultiUV_Metallic SecondaryAlbedo slot (UV1). Mirrors Unity's built-in
+// "Standard" shader's property set 1:1 (see LightmapMaterialCache.GetVariantOrOriginal, which
+// clones a Standard material and only swaps the `shader` reference), plus two extra properties
+// carrying the baked lightmap texture and its ScaleOffset.
 //
-// This shader intentionally mirrors Unity's built-in "Standard" shader property set 1:1
-// (see BakedLightmapMaterialCache.GetVariantOrOriginal, which clones a Standard material and
-// only swaps the `shader` reference) plus two additional properties carrying the baked
-// lightmap texture and its ScaleOffset (as authored into renderer.lightmapScaleOffset).
-//
-// Rendering quality in the Unity Editor is not a concern here: this shader exists purely as a
-// routing marker for BakedLightmapStandardConverter (MaterialConverterAttribute keyed on this
-// shader's name). It is never sent to Renderite. A single forward pass approximating the
-// Standard look (albedo * baked lightmap) is provided so the material doesn't render as
-// magenta/invalid in the Unity scene view.
-//
-// This is a Built-in Render Pipeline-only conversion marker shader: it will render as
-// magenta/invalid in a project using URP or HDRP, since it doesn't implement either pipeline's
-// shader interface. That has no effect on the conversion itself (BakedLightmapStandardConverter
-// reads this material's properties directly via the Material API, it never actually renders this
-// shader for Resonite's benefit) - only the Unity Editor scene view preview is affected.
+// This shader is never sent to Renderite - BakedLightmapStandardConverter (keyed on this
+// shader's name via MaterialConverterAttribute) reads the material's properties directly via
+// the Material API. The forward pass here exists only so the material doesn't render as
+// magenta/invalid in the Unity scene view; it is Built-in Render Pipeline-only and will still
+// show as invalid under URP/HDRP, with no effect on conversion.
 Shader "ResoniteSDK/BakedLightmapStandard"
 {
     Properties
@@ -46,11 +37,9 @@ Shader "ResoniteSDK/BakedLightmapStandard"
         _BakedLightmap ("Baked Lightmap", 2D) = "white" {}
         _BakedLightmapST ("Lightmap ScaleOffset", Vector) = (1,1,0,0)
 
-        // Desaturated (luma-only) companion of _BakedLightmap, same UV/ScaleOffset. Not sampled
-        // by this preview-only fragment shader (see file header) - property storage only, read
-        // back by BakedLightmapStandardConverter for the additive fill slot so per-object
-        // baked-lightmap color casts (window=cool, lamp=warm) don't leak into the brightness-only
-        // ambient approximation.
+        // Desaturated (luma-only) companion of _BakedLightmap, same UV/ScaleOffset. Property
+        // storage only - not sampled by this preview fragment shader, read back by
+        // BakedLightmapStandardConverter for the additive-fill slot instead.
         _BakedLightmapGray ("Baked Lightmap (Desaturated)", 2D) = "white" {}
     }
 

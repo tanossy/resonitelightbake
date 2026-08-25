@@ -1,48 +1,29 @@
 using FrooxEngine;
 using UnityEngine;
 
-// ============================================================================================
 // Heuristic converter: any Unity shader whose name contains "water" (case-insensitive)
 // -> Resonite PBS_Metallic + native Panner2D UV scroll.
-// ============================================================================================
 //
-// This reproduces the community-standard water-surface pattern confirmed by a live-world
-// investigation (4 worlds / 48 getSlot samples via the resonite-world-study skill): water in
-// existing Resonite worlds is built from a plain PBS_Metallic (or PBS_Specular) material -
-// normal map + detail normal map, high metallic/smoothness - driven by a Panner2D component
-// that scrolls the material's TextureOffset field over time. There is no dedicated "water"
-// material/shader type in Resonite itself; every water surface found in the wild is just this
-// PBS + Panner2D combo.
+// There is no dedicated "water" material/shader type in Resonite; the community pattern
+// (confirmed by live-world inspection) is a plain PBS_Metallic/PBS_Specular material with a
+// Panner2D component scrolling its TextureOffset field over time. This converter targets
+// custom water shaders (e.g. MomomaShader/Surface/ParallaxWater, "SeaWater") that have no
+// dedicated converter of their own. Since these are arbitrary third-party shaders, only the
+// properties guaranteed to exist on every Material (mainTexture/mainTextureScale/
+// mainTextureOffset, "_Color") are read unconditionally; everything else (_BumpMap/_BumpScale/
+// _Metallic/_Glossiness) is read behind HasProperty(...) since most water shaders don't follow
+// the Standard-shader naming convention.
 //
-// This converter targets custom water shaders (e.g. MomomaShader/Surface/ParallaxWater,
-// "SeaWater", and similar) that are NOT one of the directly-supported Unity/Resonite shaders
-// and therefore have no dedicated converter. Since
-// these are arbitrary third-party/custom shaders, this converter only reads:
-//   - Properties guaranteed to exist on every UnityEngine.Material regardless of shader
-//     (mainTexture / mainTextureScale / mainTextureOffset, and the always-present "_Color"
-//     property read via HasProperty like everywhere else in this codebase): read
-//     unconditionally.
-//   - Everything else (_BumpMap / _BumpScale / _Metallic / _Glossiness) is read only behind
-//     material.HasProperty(...), exactly like StandardBaseConverter does for the built-in
-//     Standard shader. No shader-specific property name is ever assumed to exist - most water
-//     shaders (Momoma's ParallaxWater included) do not use the Standard naming convention at
-//     all, so guessing would silently produce nothing.
-//
-// The Panner2D setup itself follows the officially-provided sample 1:1:
-// Assets/ResoniteSDK/MaterialConverters/Custom/TestPanningConverter.cs.
+// Panner2D setup mirrors Assets/ResoniteSDK/MaterialConverters/Custom/TestPanningConverter.cs.
 [MaterialConverter(true)]
 public class WaterPanningConverter : ResoniteMaterialConverter
 {
     public FrooxEngine.PBS_MetallicWrapper PBS;
     public FrooxEngine.Panner2DWrapper Panner;
 
-    // Default UV scroll speed (UV units/second), used because none of the water shaders
-    // matched by this converter expose a readable shader-specific flow/panning-speed
-    // property (unlike Custom/TestPanningShader's "_PanningSpeed", these are real-world
-    // custom shaders with unknown/undocumented property layouts - see file header). Kept
-    // deliberately slow/gentle: a calm scrolling water surface rather than a fast-scrolling
-    // texture. If a specific water shader is later found to expose its own flow-speed
-    // property, prefer reading it via HasProperty over relying on this default.
+    // Default UV scroll speed (UV units/second): none of the matched water shaders expose a
+    // readable flow-speed property, so this is a fixed, deliberately gentle fallback. Prefer
+    // reading a shader-specific speed property via HasProperty if one is ever found.
     private static readonly Vector2 DefaultPanningSpeed = new Vector2(0.02f, 0.015f);
 
     public static float? EvaluateHeuristicConversion(UnityEngine.Material material)
@@ -79,23 +60,15 @@ public class WaterPanningConverter : ResoniteMaterialConverter
         data.NormalMap = context.GetITexture2D(GetTextureOrDefault(material, "_BumpMap"));
         data.NormalScale = GetFloatOrDefault(material, "_BumpScale", 1f);
 
-        // Water reads as convincingly wet/reflective even without an explicit metallic/gloss
-        // map, so fall back to a "water-like" high metallic / high smoothness default (per
-        // the community pattern from the file header) when the shader doesn't expose
-        // _Metallic/_Glossiness itself.
+        // Fall back to a high metallic/smoothness default so water reads as wet/reflective
+        // even when the shader exposes no _Metallic/_Glossiness of its own.
         data.Metallic = GetFloatOrDefault(material, "_Metallic", 0.8f);
         data.Smoothness = GetFloatOrDefault(material, "_Glossiness", 0.95f);
 
-        // Panner2D setup - identical pattern to TestPanningConverter.cs: drive the PBS
-        // material's TextureOffset field to continuously scroll its (normal map) UVs.
+        // Panner2D drives the PBS material's TextureOffset field to scroll its UVs over time.
         pannerData.Enabled = true;
         pannerData.persistent = true;
-
-        // The panner drives the TextureOffset field on the PBS material.
         pannerData._target = data.TextureOffset_Element.Member;
-
-        // See DefaultPanningSpeed's doc comment: no shader-specific speed property could be
-        // read, so a fixed gentle default is used instead.
         pannerData._speed = DefaultPanningSpeed;
 
         // Carry over whatever static texture offset the source material already had.

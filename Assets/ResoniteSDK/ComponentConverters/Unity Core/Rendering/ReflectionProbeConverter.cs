@@ -17,8 +17,8 @@ public static class ReflectionProbeHelper
                 break;
 
             case UnityEngine.Rendering.ReflectionProbeMode.Custom:
-                // This is the closest equivalent, but whatever logic is triggering the custom one won't likely
-                // translate, so this might need additional work
+                // Closest equivalent; whatever custom trigger logic drove the Unity probe likely
+                // won't translate as-is.
                 resonite.ProbeType = Renderite.Shared.ReflectionProbeType.OnChanges;
                 break;
         }
@@ -40,14 +40,11 @@ public static class ReflectionProbeHelper
 
         resonite.Importance = unity.importance;
 
-        // Resonite (Renderite) doesn't apply any post-processing tonemapping on the main camera
-        // (verified via direct inspection of Renderite.Unity.Renderer). On the Unity side, bright HDR
-        // reflection components are compressed in the Scene View by PPv2's NeutralTonemapper, but since
-        // Resonite has nothing equivalent, the reflection comes through at its raw brightness even with
-        // the same Intensity value, and looks "glaring". A single scalar coefficient can't exactly
-        // reproduce the entire tonemap curve (see PPv2ToneMapMath.ComputeReflectionProbeCompensationFactor
-        // for details), but this approximates it by multiplying in an attenuation coefficient based on
-        // the actual NeutralTonemap formula. Can be disabled via ToneMapCompensationState.Enabled = false.
+        // Resonite applies no post-processing tonemapping on the main camera, so bright HDR
+        // reflections come through at raw brightness (vs. Unity, where PPv2's NeutralTonemapper
+        // compresses them) even at the same Intensity - see
+        // PPv2ToneMapMath.ComputeReflectionProbeCompensationFactor for the compensation formula.
+        // Disable via ToneMapCompensationState.Enabled = false.
         resonite.Intensity = unity.intensity * (ToneMapCompensationState.Enabled
             ? PPv2ToneMapMath.ComputeReflectionProbeCompensationFactor()
             : 1f);
@@ -67,7 +64,7 @@ public static class ReflectionProbeHelper
         resonite.NearClip = unity.nearClipPlane;
         resonite.FarClip = unity.farClipPlane;
 
-        // If the probe has everything culled, then we can consider it skybox only
+        // An empty culling mask means the probe only ever sees the skybox
         resonite.SkyboxOnly = unity.cullingMask == 0;
 
         if (resonite.ProbeType == Renderite.Shared.ReflectionProbeType.Baked)

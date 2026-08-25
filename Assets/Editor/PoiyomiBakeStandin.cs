@@ -1,80 +1,51 @@
 // PoiyomiBakeStandin.cs
 //
-// ダイダロス作 — Poiyomiシェーダーのマテリアルにベイク済みライトマップを乗せるための一時代役。
-// (SDK本体には一切触れない。Assets/Editor 配下の追加ファイルのみで完結する拡張。
-//  BakeryTempObjectSuppression.cs と同様、関心事を分離した専用ファイル。)
+// Temporarily swaps Poiyomi-shaded materials to a plain Standard-shader stand-in for
+// baking, then restores the originals afterward. Editor-only extension; the SDK
+// itself is not modified.
 //
-// --- 背景・確定事実（実物確認済み。推測ではない） -------------------------------------------
-// Assets/ResoniteSDK/ComponentConverters/Unity Core/Rendering/LightmapMaterialCache.cs:180
-// の適格判定は `source.shader.name != "Standard"` で弾く。Poiyomiシェーダー
-// (Assets/ResoniteSDK/MaterialConverters/Custom/Poiyomi/PoiyomiConverter.cs の
-// EvaluateHeuristicConversion と同一ロジック: シェーダー名が ".poiyomi/" を含む) は必ずここで
-// 弾かれ、ベイク照明(SecondaryAlbedo)が一切乗らない — 警告も出ない仕様。
+// Why: LightmapMaterialCache only accepts shader.name == "Standard", so Poiyomi
+// materials are silently skipped and never receive a baked lightmap (no warning is
+// raised). Poiyomi happens to reuse Standard-compatible property names for base
+// color/normal map/emission (not for metallic/smoothness), so re-shading to Standard
+// and baking through the existing Standard pipeline is the simplest way to get Poiyomi
+// surfaces lit. The toon look is lost on the baked result — an accepted tradeoff.
 //
-// Poiyomiマテリアルは実は Standard 互換のプロパティ名を流用している
-// (PoiyomiPbsConverter.cs で確認済み): _MainTex (Material.mainTexture 経由), _Color, _BumpMap,
-// _BumpScale, _EmissionColor, _EmissionMap, _EnableEmission, _EmissionStrength。
-// Metallic/Smoothness は _MochieMetallicMaps 等の独自名で非互換 (今回は対象外)。
+// Only Opaque-equivalent Poiyomi materials are swapped (per
+// PoiyomiBlendModeComputer.FromPoiyomi). Cutout/Fade/Transparent materials (foliage,
+// hair cards, etc.) are left to the normal non-baked PoiyomiConverter path instead,
+// because LightmapMaterialCache requires _Mode == 0 (Opaque) and forcing them opaque
+// would break their silhouette.
 //
-// 裁定: Poiyomi は元々 Resonite に移すとフラットになるので、Standard へ変換してからベイクする
-// (トゥーン表現喪失は容認済み)。
-//
-// --- 実装方針 ---------------------------------------------------------------------------
-// 新しい判定ロジックや新しい出力型は作らない。ベイク直前にシーン内の対象 Renderer の
-// sharedMaterials を一時的な Standard 代役マテリアルへ差し替え、その状態でベイク & 送信する
-// ことで、既存の実証済み Standard 経路 (LightmapMaterialCache の PBS_MultiUV_Metallic
-// 差し込み) にそのまま乗せる。Convert() 完了直後に必ず元の Poiyomi マテリアルへ復元する
-// (Unity のシーンビュー上は通常時は常に本来の Poiyomi 見た目に戻る)。
-//
-// 安全ゲート (重要): Standard 化するのは PoiyomiのBlendModeが元々Opaque相当のマテリアルだけ。
-// Cutout/Fade/Transparent (葉っぱ・柵・髪の毛カード等) は対象外とし、既存の PoiyomiConverter
-// 経路 (ベイク無し) にそのまま委ねる。理由: LightmapMaterialCache の適格条件が _Mode==0
-// (Opaque) のみのため、強制Opaque化するとシルエットが崩れる新規不具合になる。BlendMode 判定
-// には Assets/ResoniteSDK/MaterialConverters/Custom/Poiyomi/PoiyomiBlendModeComputer.cs の
-// PoiyomiBlendModeComputer.FromPoiyomi(material) をそのまま使う (SDKフォーク側/ライブ側の
-// 両方に同一ファイルが存在することを確認済み — 本ファイルはライブ側 K:/base/ResoniteWorld の
-// コピーを直接参照する。ResoniteSDK配下・本ファイルの属する Assets/Editor 配下いずれにも
-// asmdef が存在しないため既定アセンブリでコンパイルされ、FrooxEngine.BlendMode /
-// PoiyomiBlendModeComputer を直接参照できる — LightmapTestHarness.cs 冒頭のコメントで確認済み
-// の同じ理屈)。
-//
-// MaterialGlobalIlluminationFlags / globalIlluminationFlags / RealtimeEmissive / HasProperty /
-// EnableKeyword は、このEditorが実際に使っている UnityEngine.CoreModule.dll
-// (2022.3.22f1, K:/base/ResoniteWorld と同じインストール) に対する文字列grepで実在確認済み
-// (2026-07-11)。
-//
-// 厳守: 元の Poiyomi マテリアルアセット(.mat)自体は絶対に変更しない。Renderer の
-// sharedMaterials 差し替えのみ (ランタイム/エディタ上の参照差し替え)。Poiyomi非対象・
-// 非Opaque・Standard以外の他シェーダーには一切触れない (回帰ゼロ)。
+// The original .mat assets are never modified — only Renderer.sharedMaterials
+// references are swapped, and always restored after conversion.
 using System.Collections.Generic;
 using FrooxEngine;
 using UnityEngine;
 
 public static class PoiyomiBakeStandin
 {
-    // Poiyomiソースマテリアル(アセットインスタンス) -> 生成済みStandard代役マテリアル。
-    // 使い回すことで、複数回の bake/convert サイクルで毎回新しい破棄予定Material(隠しオブジェ
-    // クト)を作らない。ソースの生きた参照が破棄された場合(シーン再読込等でMaterialが再ロード
-    // されたケース)はUnityの疑似null比較(TryGetValue後のnullチェック)で捕捉し、キーごと素通し
-    // で作り直す。
+    // Poiyomi source material -> generated Standard stand-in, reused across bake/convert
+    // cycles instead of creating a new material every time. If a source reference goes
+    // stale (e.g. reloaded after a scene reload), Unity's fake-null check after
+    // TryGetValue catches it and a fresh stand-in is created for that key.
     static readonly Dictionary<UnityEngine.Material, UnityEngine.Material> _standinByPoiyomiSource = new Dictionary<UnityEngine.Material, UnityEngine.Material>();
 
-    // SwapIn() が実際に上書きした Renderer -> 元の sharedMaterials 配列。差し替えが有効な間だけ
-    // 非null (RestoreAll() が復元後にnullへ戻す)。これにより:
-    //  - RestoreAll() を差し替え前に呼んでも安全なno-op になる
-    //  - 差し替え済みの状態でもう一度 SwapIn() を呼んでも、記録済みの「本物のPoiyomi」を
-    //    「今日の代役」で上書きしてしまわない(冪等性)
+    // Renderers actually overwritten by SwapIn() -> their original sharedMaterials.
+    // Non-null only while a swap is active (RestoreAll() sets it back to null after
+    // restoring). This makes RestoreAll() a safe no-op if called before any swap, and
+    // makes SwapIn() idempotent — a second call won't overwrite recorded originals
+    // with a second round of stand-ins.
     static Dictionary<Renderer, UnityEngine.Material[]> _originalMaterialsByRenderer;
 
-    // ------------------------------------------------------------------
-    // SwapIn — ベイク開始時 (StartBake()/StartBakeUnity() 冒頭、SetSceneLightsEnabled(true) の
-    // 直後) に LightmapTestHarness から呼ばれる。
-    // ------------------------------------------------------------------
+    // Called by LightmapTestHarness at the start of a bake, right after
+    // SetSceneLightsEnabled(true).
     public static void SwapIn()
     {
         if (_originalMaterialsByRenderer != null)
         {
-            // 冪等性ガード: 記録済みの「本物」を「今日の代役」で上書きして永久に失う事故を防ぐ。
+            // Idempotency guard: don't overwrite recorded originals with stand-ins from
+            // a second SwapIn() call.
             Debug.Log("[PoiyomiBakeStandin] SwapIn: a swap is already active; call ignored (call RestoreAll() first).");
             return;
         }
@@ -84,7 +55,7 @@ public static class PoiyomiBakeStandin
         foreach (var renderer in CollectCandidateRenderers())
         {
             var sourceMaterials = renderer.sharedMaterials;
-            UnityEngine.Material[] replacement = null; // 少なくとも1スロットが実際に変わる場合のみ確保
+            UnityEngine.Material[] replacement = null; // only allocated if a slot actually changes
 
             for (int i = 0; i < sourceMaterials.Length; i++)
             {
@@ -103,7 +74,7 @@ public static class PoiyomiBakeStandin
 
             if (replacement != null)
             {
-                recorded[renderer] = sourceMaterials; // 復元用に「元の」配列そのものを保持
+                recorded[renderer] = sourceMaterials;
                 renderer.sharedMaterials = replacement;
             }
         }
@@ -114,30 +85,24 @@ public static class PoiyomiBakeStandin
             Debug.Log($"[PoiyomiBakeStandin] SwapIn: swapped Poiyomi->Standard standin material(s) on {recorded.Count} renderer(s) for baking.");
     }
 
-    // ------------------------------------------------------------------
-    // RestoreAll — Convert() の SendCurrentScene() 呼び出しを囲む try/finally の finally から
-    // (成功時も例外時も必ず) 呼ばれる。
-    // ------------------------------------------------------------------
+    // Called from the finally block wrapping Convert()'s SendCurrentScene() call, so it
+    // always runs whether the bake succeeded or threw.
     public static void RestoreAll()
     {
         if (_originalMaterialsByRenderer == null)
-            return; // SwapIn() が一度も走っていない、またはRestoreAll()が既に消費済み
+            return; // No swap is active, or RestoreAll() already consumed it.
 
-        // 2026-07-12 バグ修正（バグハンター指摘, ダイダロス対応）: 以前はループ内でtry/catchを
-        // 持たず、1件でも renderer.sharedMaterials セットが例外を投げると(破棄済みRenderer・
-        // マテリアル数不一致等) foreach が即座に中断し、以降のRendererが復元されないまま
-        // _originalMaterialsByRenderer = null にも到達しなかった(冪等性ガードにより次回の
-        // SwapIn()も黙って空振りする=一度失敗すると永久にPoiyomi代役材が残り続ける)。
-        // 個別にtry/catchし、失敗したRendererがあってもログを出しつつ残りの復元を継続する。
-        // _originalMaterialsByRenderer = null への到達は例外の有無に関わらず必ず保証する
-        // (ループ後、無条件に実行する既存の配置のまま = finally相当)。
+        // Each renderer is restored independently: if one throws (destroyed renderer,
+        // mismatched material count, etc.) the rest still get restored and
+        // _originalMaterialsByRenderer is still cleared, instead of leaving the swap
+        // stuck active and the standins in place indefinitely.
         int restored = 0;
         int failed = 0;
         foreach (var kvp in _originalMaterialsByRenderer)
         {
             var renderer = kvp.Key;
             if (renderer == null)
-                continue; // SwapIn()以降にRendererが破棄/シーン変更された場合は何もしない
+                continue; // Renderer was destroyed or the scene changed since SwapIn(); nothing to restore.
 
             try
             {
@@ -168,8 +133,8 @@ public static class PoiyomiBakeStandin
             yield return smr;
     }
 
-    // 検出: PoiyomiConverter.EvaluateHeuristicConversion と同一ロジック (実物確認済み)。
-    // ゲート: PoiyomiBlendModeComputer.FromPoiyomi の結果が BlendMode.Opaque の場合のみ対象。
+    // Detection mirrors PoiyomiConverter.EvaluateHeuristicConversion; gated to
+    // Opaque-equivalent materials only (see PoiyomiBlendModeComputer.FromPoiyomi).
     static bool IsEligiblePoiyomiOpaque(UnityEngine.Material material)
     {
         if (material == null || material.shader == null)
@@ -185,10 +150,10 @@ public static class PoiyomiBakeStandin
     {
         if (_standinByPoiyomiSource.TryGetValue(source, out var cached) && cached != null)
         {
-            // ソースの .mat アセット自体は絶対に変更しないが (厳守事項)、Unity上でベイクの
-            // 合間にPoiyomi側のプロパティが編集されることは普通にあり得る。次のベイクにその
-            // 変更が反映されるよう、キャッシュヒット時も毎回プロパティを再同期する
-            // (LightmapMaterialCache 自身の「毎回再読込・再書込」設計を踏襲)。
+            // The source .mat asset is never modified, but its Poiyomi properties can
+            // still be edited between bakes — resync on every cache hit so the next
+            // bake picks up those changes (mirrors LightmapMaterialCache's own
+            // reread-every-time approach).
             SyncStandinFromSource(cached, source);
             return cached;
         }
@@ -208,11 +173,9 @@ public static class PoiyomiBakeStandin
         return standin;
     }
 
-    // ソース(Poiyomi)側からの読み取りは全て HasProperty でガードする — Poiyomiバージョン差で
-    // 無いプロパティがある前提。代役(standin)側は常にビルトインStandardシェーダーそのもの
-    // (このメソッド内で毎回 new Material(Shader.Find("Standard")) 由来) なので、standin への
-    // 書き込みには _MainTex/_Color/_BumpMap/_BumpScale/_EmissionColor/_EmissionMap/_Mode の
-    // いずれについてもガードは不要 (Standardが標準で持つプロパティ)。
+    // Reads from the Poiyomi source are HasProperty-guarded since property sets vary by
+    // Poiyomi version. The stand-in is always a fresh built-in Standard material, so
+    // writes to it never need guarding.
     static void SyncStandinFromSource(UnityEngine.Material standin, UnityEngine.Material source)
     {
         if (source.HasProperty("_MainTex"))
@@ -250,10 +213,8 @@ public static class PoiyomiBakeStandin
                 standin.SetTexture("_EmissionMap", source.GetTexture("_EmissionMap"));
 
             standin.EnableKeyword("_EMISSION");
-            // Unity自身のベイクパイプライン(Progressive/Enlighten)は、マテリアルのEmissionを
-            // GI寄与として拾うのにこのフラグを要求する — _EMISSIONキーワードはレンダリング上の
-            // 見た目にのみ関わる別軸。globalIlluminationFlags/RealtimeEmissiveは本ファイル冒頭
-            // コメントの通りDLL文字列grepで実在確認済み。
+            // Unity's baking pipeline (Progressive/Enlighten) needs this flag to pick up
+            // emission as a GI contribution; the _EMISSION keyword only affects rendering.
             standin.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
         }
         else
@@ -264,8 +225,8 @@ public static class PoiyomiBakeStandin
             standin.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
         }
 
-        // ゲート(IsEligiblePoiyomiOpaque)で既にOpaque確認済み、かつ新規Standardマテリアルの
-        // 既定値も_Mode==0(Opaque)なので実質no-op — 単なる明示。
+        // No-op in practice (IsEligiblePoiyomiOpaque already confirmed Opaque, and a
+        // fresh Standard material defaults to _Mode == 0) — set explicitly for clarity.
         standin.SetFloat("_Mode", 0f);
     }
 }

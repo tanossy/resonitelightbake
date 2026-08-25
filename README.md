@@ -23,8 +23,8 @@ Fork point / フォーク元コミット: `5eea4b03` (right after PR #117 merged
    `ResoniteLightbake`のUnityPackageを入れる
 3. Launch Resonite and get ResoniteLink ready to connect /
    Resoniteを起動し、ResoniteLinkが使えるように設定する
-4. Click **Bake & Send** in the UnitySDK panel (`Resonite SDK > Lightmap Pipeline`) /
-   UnitySDKのパネル（`Resonite SDK > Lightmap Pipeline`）で **Bake & Send** を押す
+4. Click **Bake & Send** in the UnitySDK panel (`Resonite SDK > Lightmap Bake & Send`) /
+   UnitySDKのパネル（`Resonite SDK > Lightmap Bake & Send`）で **Bake & Send** を押す
 
 ---
 
@@ -82,18 +82,18 @@ don't assume it's still current just because it says so here — check for yours
    - **Convert Skybox** — whether to also send the skybox (Material/ReflectionProbe); the
      only one of these that's actually part of vanilla Resonite.UnitySDK
    - Force Refresh Generated Lightmaps and Send Tonemap Compensation now live in the
-     **Lightmap Pipeline** panel's "Send-Time Options" section instead (`Resonite SDK >
-     Lightmap Pipeline`; applies to either baker — see "Tonemap Compensation" below)
+     **Lightmap Bake & Send** panel's "Send-Time Options" section instead (`Resonite SDK >
+     Lightmap Bake & Send`; applies to either baker — see "Tonemap Compensation" below)
 4. Click `Send Current Scene`. A single `Unity Import` slot is created directly under World
    Root (an existing one is deleted and rebuilt, so re-sending never produces duplicates),
    and everything is placed under it
 5. `AssetConverter.cs` enforces a 60-second timeout on asset conversion. If you hit a
-   timeout or WebSocket disconnect, use `Reset Conversion State` in the Lightmap Pipeline
-   panel's "Debug / Cleanup" section and resend
+   timeout or WebSocket disconnect, just resend - `EnsureConverter()` self-heals automatically
+   (see "Debugging / partial sends" below)
 
 #### Debugging / partial sends
 
-Open `Resonite SDK > Lightmap Pipeline`, scroll to the "Debug / Cleanup" section (shown
+Open `Resonite SDK > Lightmap Bake & Send`, scroll to the "Debug / Cleanup" section (shown
 regardless of baker; requires `Resonite SDK Manager` to already be connected for most of
 these, except where noted):
 
@@ -103,33 +103,15 @@ these, except where noted):
 - **Retry Missing Asset URLs** — use when only the asset upload step failed while
   everything else succeeded
 - **Log Messages JSON** — log sent messages as JSON (debug only, default OFF)
-- **Reset Conversion State** — rebuilds `SceneConverter` and its converter/asset-root
-  state. The recovery step for when the connection gets into a bad state (a timeout or a
-  mid-send disconnect), not something to press routinely
-- **Clear Generated Lightmap Variants** — deletes the whole
-  `Assets/ResoniteSDK/Generated/LightmapVariants` folder (variant materials and decoded
-  lightmap PNGs alike). Fully reproducible by re-running scene conversion, so always safe
-  to run; doesn't need a ResoniteLink connection, works even mid-bake
 
-**TIPS: why aren't these two run automatically?** Both already have their own automatic
-staleness detection, so running them unconditionally on every send/bake would just waste
-work re-doing things that were already fine:
-- `SceneConverter.EnsureConverter()` already calls the equivalent of Reset conversion state
-  by itself whenever `UniqueSessionId` or `Port` actually changes - a normal healthy send
-  never needs it pressed manually. The manual button exists only for the case that check
-  can't catch: the session/port stayed the same, but something got stuck anyway.
-- `LightmapDecoder.cs` already re-decodes a lightmap the moment its source content hash
-  changes (see its `IsHashCurrent` check) - generated variants don't go stale silently.
-  Clear Generated Lightmap Variants exists for genuinely orphaned assets left behind by a
-  deleted/renamed scene, which - per that method's own doc comment - can't be safely swept
-  automatically without knowing every scene GUID that has ever existed.
-
-These used to live in a separate `ResoniteSDKDebugWindow.cs` (`Resonite SDK > Open Debug
-Tools`), which was removed for being redundant with this panel. Two buttons from that
-window weren't carried over: "Cleanup converters in the scene" (`Reset Conversion State`
-already calls the same cleanup internally) and "Cleanup Resonite Components in the
-scene" (found to be entirely redundant with the cleanup chain the other buttons already
-trigger, and a source of "Destroying object multiple times" warnings on its own).
+No "Reset Conversion State" or "Clear Generated Lightmap Variants" buttons - both operations
+already happen automatically. `ResoniteLinkWindow.EnsureConverter()` resets on its own
+whenever the session/port changes or the converter's `IsCorrupted` flag gets set (which is
+exactly what a timeout or mid-send disconnect sets), so resending after a failure already
+self-heals. `SceneConverter.ConvertScene()` already clears generated lightmap variants
+automatically whenever "Force Refresh Generated Lightmaps" (Send-Time Options section) is on.
+This panel used to live alongside a separate `ResoniteSDKDebugWindow.cs`, since removed for
+being redundant with it.
 
 #### Objects excluded automatically
 
@@ -173,16 +155,15 @@ Lightmapper baked lightmaps in Resonite. Operational notes:
 
 There's a real gap between how a scene looks in the Unity Editor and how it looks on a
 live Resonite client. The following static values were tuned iteratively against a running
-client. `IntensityCeiling`/`WhiteBalanceShift` have sliders in the **Lightmap Pipeline**
-panel's "Send-Time Light Tuning" section, and `RangeScale`/`ColorSaturationCompensation`
-have sliders in that same panel's "Baked Lightmap Exposure" section (`Resonite SDK >
-Lightmap Pipeline`, both sections apply to either baker — see that panel's own section
-below); the rest still require a code edit:
+client. `IntensityCeiling` has a slider in the **Lightmap Bake & Send** panel's "Send-Time
+Light Tuning" section, and `RangeScale`/`ColorSaturationCompensation` have sliders in that
+same panel's "Baked Lightmap Exposure" section (`Resonite SDK > Lightmap Bake & Send`, both
+sections apply to either baker — see that panel's own section below); the rest still require
+a code edit:
 
 | File | Field | Current value | Meaning |
 |---|---|---|---|
 | `LightTuning.cs` | `IntensityCeiling` | 0.9 | Target intensity for the scene's single brightest light; every light is scaled by the ratio needed to put the brightest one exactly here (self-normalizing per scene, not a fixed multiplier) |
-| `LightTuning.cs` | `WhiteBalanceShift` | 0.55 | Blends light color toward white at send time (0 = original color, 1 = pure white) |
 | `LightmapDecoder.cs` | `RangeScale` | 1.1 | Pre-decode gain applied to baked lightmap data |
 | `LightmapDecoder.cs` | `ColorSaturationCompensation` | 0.6 | Saturation reduction applied to the baked lightmap data itself (0–1) |
 | `BakedLightmapStandardConverter.cs` | `SmoothnessCompensation` | 0.05 | Multiplier on scalar Smoothness (only affects materials with no MetallicMap) |
@@ -201,7 +182,7 @@ Reproduces Unity PPv2's Neutral Tonemapper-style color compression and applies i
 material colors — AlbedoColor/EmissiveColor, saturation only — and to Reflection Probe
 intensity). Resonite's renderer (Renderite) does no camera-side post-process tonemapping,
 so the same HDR values look glarier/blown-out in Resonite than they did tonemapped in
-Unity. Toggle it from the **Lightmap Pipeline** panel's "Send Tonemap Compensation" checkbox
+Unity. Toggle it from the **Lightmap Bake & Send** panel's "Send Tonemap Compensation" checkbox
 in the "Send-Time Options" section (default ON).
 
 **Currently only the Reflection Probe half has a visible effect.** The material-color half
@@ -232,8 +213,8 @@ comments for why full grading was tried and reverted).
    application point; `ReflectionProbeConverter.cs` applies it to Reflection Probe intensity.
    Lives in its own `Assets/ResoniteSDK/ToneMapCompensation/` folder.
 3. **Send-time light tuning** (new, already externalized) — `LightTuning.cs` consolidates
-   the overall light brightness multiplier and white-shift blend into one file
-   (`LightConverter.cs` itself is untouched apart from a 2-line call-out).
+   the overall light brightness multiplier into one file (`LightConverter.cs` itself is
+   untouched apart from a 1-line call-out).
 4. **Scene-import hygiene** (new, already externalized):
    - Camera / Missing Prefab exclusion — `SceneRootFilter.cs`
    - ID-collision-proof allocation — `GlobalIdAllocator.cs`, a process-wide, monotonically
@@ -264,17 +245,17 @@ comments for why full grading was tried and reverted).
     warning in `MeshRendererConverter.cs`; a Unity "fake null" crash fix and SH2 default-off
     in `SkyboxConverter.cs`; assorted fallback handling in `Texture2DConverter.cs`/
     `StandardConverter.cs`/`UnlitConverter.cs`.
-11. **Lightmap Pipeline panel** (new, `Assets/Editor/`) — `LightmapPipelineWindow.cs`
-    (`Resonite SDK > Lightmap Pipeline`) turns "pick a quality preset → bake → send" into
+11. **Lightmap Bake & Send panel** (new, `Assets/Editor/`) — `LightmapPipelineWindow.cs`
+    (`Resonite SDK > Lightmap Bake & Send`) turns "pick a quality preset → bake → send" into
     one button (`Bake & Send`), for either Bakery (if installed) or Unity's built-in
     Progressive Lightmapper. Also exposes standalone `Bake`/`Convert Lights`/partial-send
     buttons, a lighting-tuning section (ambient/shadow/sun knobs) for the Unity Standard
     path, an experimental "bake normal detail into lightmap" option, a "Send-Time Options"
     section (Force Refresh Generated Lightmaps / Send Tonemap Compensation toggles, moved
     here from the main SDK panel since they're overlay additions, not vanilla
-    Resonite.UnitySDK), a "Send-Time Light Tuning" section
-    (`LightTuning.IntensityCeiling`/`WhiteBalanceShift` sliders), and a "Baked Lightmap
-    Exposure" section (`LightmapDecoder.RangeScale`/`ColorSaturationCompensation` sliders —
+    Resonite.UnitySDK), a "Send-Time Light Tuning" section (`LightTuning.IntensityCeiling`
+    slider), and a "Baked Lightmap Exposure" section
+    (`LightmapDecoder.RangeScale`/`ColorSaturationCompensation` sliders —
     a bake's own brightness varies per scene, so these are meant to be re-checked whenever
     you switch rooms) — all three of the latter sections are shown regardless of baker since
     they apply at conversion/send time (or, for the last one, at lightmap-decode time), not
@@ -298,9 +279,8 @@ tunable values into new files.**
 
 Example (`LightConverter.cs`):
 ```csharp
-// The official file's only change is these 2 lines
+// The official file's only change is this 1 line
 resonite.Intensity = LightTuning.ApplyIntensity(unity.intensity);
-resonite.Color = new ColorX(LightTuning.ApplyColor(unity.color));
 ```
 The actual multiplier/logic lives entirely in the new `LightTuning.cs` in the same folder.
 
@@ -346,10 +326,6 @@ work, since fixed:
   candidate for an upstream issue report; `AssetConverter.cs`'s 60-second timeout only
   detects this, it doesn't fix the root cause)
 - `AudioEffectConverter.cs` has not been verified against real in-world audio in Resonite
-- `LightTuning.WhiteBalanceShift` blends every light toward white uniformly regardless of
-  its original hue, so a scene with multiple differently-colored lights would have those
-  color differences washed out evenly (this SDK's reference scene uses a single warm color
-  scheme, so multi-color support hasn't been built yet)
 - `LightTuning.IntensityCeiling`'s per-scene normalization only bounds the single brightest
   light in the scene, not the cumulative brightness of many lights summed together — a
   scene with dozens of moderate-intensity fill lights, each individually under the ceiling,
@@ -409,18 +385,18 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
 3. 必要に応じてトグルを確認:
    - **Convert Skybox** — スカイボックス（Material/ReflectionProbe）も一緒に送るか
      （このパネルの項目のうち、これだけが本家Resonite.UnitySDK由来のvanilla機能）
-   - Force Refresh Generated LightmapsとSend Tonemap Compensationは**Lightmap Pipeline**
-     パネルの「送信時オプション」セクションに移設済み（`Resonite SDK > Lightmap Pipeline`。
+   - Force Refresh Generated LightmapsとSend Tonemap Compensationは**Lightmap Bake & Send**
+     パネルの「送信時オプション」セクションに移設済み（`Resonite SDK > Lightmap Bake & Send`。
      どちらのBakerでも使える。下記「Tonemap Compensation」参照）
 4. `Send Current Scene` を押す。World Root直下に単一の `Unity Import` スロットが作られ
    （既存があれば削除してから作り直す＝再送信しても重複しない）、その下に全内容が入る
 5. 送信中は `AssetConverter.cs` 側に60秒のタイムアウトが設定されている。
-   タイムアウトやWebSocket切断が起きたらLightmap Pipelineパネルの「デバッグ / クリーンアップ」
-   セクションの `Reset Conversion State` → 再送信で復帰できる
+   タイムアウトやWebSocket切断が起きても再送信するだけでよい（`EnsureConverter()`が自動で
+   復旧する。下記「デバッグ・部分送信」参照）
 
 #### デバッグ・部分送信
 
-`Resonite SDK > Lightmap Pipeline` を開き、「デバッグ / クリーンアップ」セクションまで
+`Resonite SDK > Lightmap Bake & Send` を開き、「デバッグ / クリーンアップ」セクションまで
 スクロール（どちらのBakerでも常時表示。一部の項目を除き`Resonite SDK Manager`が先に
 接続されている必要あり）:
 
@@ -428,30 +404,14 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
   一部だけ再送信したい時に使用（`ConversionPassState.ActivePass` で内部的に何を送るか絞り込む）
 - **Retry Missing Asset URLs** — アセットアップロードだけ失敗して他は成功している場合に使用
 - **Log Messages JSON** — 送信メッセージをJSONでログ出力（デバッグ用、デフォルトOFF）
-- **Reset Conversion State** — `SceneConverter`とコンバータ/アセットルートの状態を作り直す。
-  接続がおかしくなった時（タイムアウトや送信中の切断）の復旧手段であり、日常的に押すものではない
-- **Clear Generated Lightmap Variants** — `Assets/ResoniteSDK/Generated/LightmapVariants`
-  フォルダ（バリアントマテリアル・デコード済みライトマップPNG含む）を丸ごと削除。
-  シーン再変換で完全に再生成されるため常に安全に実行可能。ResoniteLink接続不要・ベイク中でも実行可
 
-**TIPS: なぜこの2つは自動実行にしないのか？** どちらも既に自前の鮮度検知を持っているため、
-毎回の送信/ベイクで無条件に実行すると、壊れていないものまで毎回作り直す無駄が発生する:
-- `SceneConverter.EnsureConverter()`は`UniqueSessionId`または`Port`が実際に変わった時、既に
-  Reset conversion state相当の処理を自動で行っている——正常な送信では手動で押す必要は無い。
-  手動ボタンが必要なのは、セッション/ポートは変わっていないのに内部状態だけ壊れた、という
-  自動検知できないケースだけ。
-- `LightmapDecoder.cs`は焼きデータのコンテンツハッシュが変わった瞬間に自動で再デコードする
-  （`IsHashCurrent`チェック参照）——生成済みバリアントが黙って古くなることは無い。Clear
-  Generated Lightmap Variantsが必要なのは、シーンの削除/リネームで残った本当の孤児ファイル
-  で、これは同メソッド自身のコメントにある通り「過去に存在した全シーンGUIDを把握しない限り
-  安全に自動掃除できない」もの。
-
-これらは以前、独立した`ResoniteSDKDebugWindow.cs`（`Resonite SDK > Open Debug Tools`）に
-あったが、このパネルと冗長なため廃止された。同ウィンドウの2ボタンは移設しなかった:
-「Cleanup converters in the scene」（`Reset Conversion State`が内部で同じクリーンアップを
-既に実行するため）と「Cleanup Resonite Components in the scene」（他ボタンが既に走らせる
-クリーンアップ連鎖と完全に重複しており、それ自体が「Destroying object multiple times」
-警告の原因になっていたと判明したため）。
+「Reset Conversion State」「Clear Generated Lightmap Variants」ボタンは無い——どちらも既に
+自動で実行される。`ResoniteLinkWindow.EnsureConverter()`はセッション/ポートの変化、または
+変換器の`IsCorrupted`フラグ（タイムアウトや送信中切断でまさに立つ）を見て自動で復旧するため、
+失敗後は再送信するだけでよい。`SceneConverter.ConvertScene()`は「Force Refresh Generated
+Lightmaps」（送信時オプションセクション）がONの時、既に生成済みライトマップ差分を自動で
+クリアする。このパネルはかつて独立した`ResoniteSDKDebugWindow.cs`と並存していたが、冗長なため
+そちらは廃止済み。
 
 #### 除外されるオブジェクト
 
@@ -489,16 +449,14 @@ Resonite側でも近い見た目に近似するパイプライン。運用の要
 #### 送信時の明るさ・色調整（実機チューニング値）
 
 Unity上での見た目とResonite実機での見た目にギャップがあり、以下のstatic値を実機検証しながら
-調整している。`IntensityCeiling`/`WhiteBalanceShift` は **Lightmap Pipeline** パネルの
-「送信時ライト調整」セクションに、`RangeScale`/`ColorSaturationCompensation` は同パネルの
-「ベイクライトマップ露出」セクションにスライダーがある（`Resonite SDK > Lightmap Pipeline`。
-いずれもどちらのBakerでも使える。下記のパネル説明も参照）。残りは値を変えたい場合コード内の
-該当フィールドを直接編集する:
+調整している。`IntensityCeiling` は **Lightmap Bake & Send** パネルの「送信時ライト調整」
+セクションに、`RangeScale`/`ColorSaturationCompensation` は同パネルの「ベイクライトマップ露出」
+セクションにスライダーがある（`Resonite SDK > Lightmap Bake & Send`。いずれもどちらのBakerでも
+使える。下記のパネル説明も参照）。残りは値を変えたい場合コード内の該当フィールドを直接編集する:
 
 | ファイル | フィールド | 現在値 | 意味 |
 |---|---|---|---|
 | `LightTuning.cs` | `IntensityCeiling` | 0.9 | シーン内で最も明るいライトがこの値になるよう、全ライトへ同じ比率で倍率を逆算（固定倍率ではなくシーンごとに自動正規化） |
-| `LightTuning.cs` | `WhiteBalanceShift` | 0.55 | 光源色を送信時だけ白側へブレンド（0=元の色, 1=純白）|
 | `LightmapDecoder.cs` | `RangeScale` | 1.1 | ベイクデータのデコード前ゲイン |
 | `LightmapDecoder.cs` | `ColorSaturationCompensation` | 0.6 | ベイクデータ自体の彩度低減（0〜1）|
 | `BakedLightmapStandardConverter.cs` | `SmoothnessCompensation` | 0.05 | スカラーSmoothnessへの係数（MetallicMap無しの材質のみ有効）|
@@ -515,7 +473,7 @@ Unity上での見た目とResonite実機での見た目にギャップがあり�
 UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリアル色
 （AlbedoColor/EmissiveColor、彩度のみ）とReflection Probe強度に反映する。Resonite
 (Renderite)は主カメラのポスト処理トーンマッピングを持たないため、同じHDR値でもUnity側より
-反射・発光がぎらつく問題への対策。**Lightmap Pipeline**パネルの「送信時オプション」内
+反射・発光がぎらつく問題への対策。**Lightmap Bake & Send**パネルの「送信時オプション」内
 「Send Tonemap Compensation」トグルでON/OFF可能（デフォルトON）。
 
 **現状、実際に見た目へ効いているのはReflection Probe側のみ。** マテリアル色側
@@ -544,8 +502,8 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
    WhiteBalance/Saturation/NeutralTonemap）を再現。`ColorGradingApproximation.cs`が
    マテリアル色への適用口、`ReflectionProbeConverter.cs`がReflection Probe強度への適用。
    本体SDKと独立した`Assets/ResoniteSDK/ToneMapCompensation/`フォルダに実装を分離。
-3. **送信時ライト調整**（新規、外だし済み） — `LightTuning.cs`がライト全体の明るさ倍率・
-   白色寄せブレンドを1ファイルに集約（`LightConverter.cs`本体は公式のまま、呼び出し2行のみ変更）。
+3. **送信時ライト調整**（新規、外だし済み） — `LightTuning.cs`がライト全体の明るさ倍率を
+   1ファイルに集約（`LightConverter.cs`本体は公式のまま、呼び出し1行のみ変更）。
 4. **シーン取り込み衛生**（新規、外だし済み）:
    - Camera/Missing Prefab除外 — `SceneRootFilter.cs`
    - ID採番の衝突防止 — `GlobalIdAllocator.cs`（プロセス全体で単調増加するstaticカウンタ、
@@ -574,15 +532,15 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
     `StandardBaseConverter.cs`等の部分送信ガード、`MeshRendererConverter.cs`の混在時警告、
     `SkyboxConverter.cs`のfake-null対策・SH2デフォルト無効化、`Texture2DConverter.cs`/
     `StandardConverter.cs`/`UnlitConverter.cs`のフォールバック処理。
-11. **Lightmap Pipelineパネル**（新規、`Assets/Editor/`） — `LightmapPipelineWindow.cs`
-    （メニュー: `Resonite SDK > Lightmap Pipeline`）が「品質プリセット選択→ベイク→送信」を
+11. **Lightmap Bake & Sendパネル**（新規、`Assets/Editor/`） — `LightmapPipelineWindow.cs`
+    （メニュー: `Resonite SDK > Lightmap Bake & Send`）が「品質プリセット選択→ベイク→送信」を
     `Bake & Send`ボタン1つに集約する。対象はBakery（導入されていれば）またはUnity標準
     Progressive Lightmapperのどちらでも。単体の`Bake`/`Convert Lights`/部分送信ボタン、
     Unity標準経路向けのライティング調整セクション（環境光/影/太陽の各つまみ）、実験的な
     「法線を焼き込む」オプション、「送信時オプション」セクション（Force Refresh Generated
     Lightmaps / Send Tonemap Compensationトグル。本家Resonite.UnitySDK非搭載のオーバーレイ
     独自機能のためメインSDKパネルからこちらへ移設）、「送信時ライト調整」セクション
-    （`LightTuning.IntensityCeiling`/`WhiteBalanceShift`のスライダー）、「ベイクライトマップ
+    （`LightTuning.IntensityCeiling`のスライダー）、「ベイクライトマップ
     露出」セクション（`LightmapDecoder.RangeScale`/`ColorSaturationCompensation`のスライダー。
     焼きデータの明るさはシーンごとに違うため部屋を変えたら要再確認）も備える。後者3つは
     ベイク時ではなく変換/送信時（露出は正確にはデコード時）に効く値のためBaker非依存で
@@ -604,9 +562,8 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
 
 例（`LightConverter.cs`）:
 ```csharp
-// 公式ファイル側の変更はこの2行のみ
+// 公式ファイル側の変更はこの1行のみ
 resonite.Intensity = LightTuning.ApplyIntensity(unity.intensity);
-resonite.Color = new ColorX(LightTuning.ApplyColor(unity.color));
 ```
 実体（倍率・ロジック）は同フォルダの新規`LightTuning.cs`側に完全分離。
 
@@ -647,9 +604,6 @@ resonite.Color = new ColorX(LightTuning.ApplyColor(unity.color));
 - ResoniteLink.dll側の未同期WebSocket切断（送信中に稀に発生、上流Issue報告候補。
   `AssetConverter.cs`の60秒タイムアウトは検知のみで根治ではない）
 - `AudioEffectConverter.cs`は実機（Resonite内での実際の音声）で未検証
-- `LightTuning.WhiteBalanceShift`は光源の元色相に関わらず一律で白へブレンドするため、
-  シーン内に複数の異なる色の光源がある場合は色差が均等に薄まる（単一色系照明のシーンでの
-  運用を前提、複数色対応は未着手）
 - `LightTuning.IntensityCeiling`のシーンごと正規化は、シーン内で最も明るい単体ライトしか
   基準にしていないため、中程度の明るさのライトが大量にある場合（個々は上限内でも合計で
   過露出になる）には対応できない
@@ -688,8 +642,8 @@ Assets/ResoniteSDK/
 │   ├── Colliders/
 │   │   └── MeshColliderConverter.cs          [official, modified] partial-send guard
 │   └── Rendering/
-│       ├── LightConverter.cs                 [official, modified (2 lines)] → calls LightTuning.cs
-│       ├── LightTuning.cs                    ★new brightness multiplier / white-shift blend
+│       ├── LightConverter.cs                 [official, modified (1 line)] → calls LightTuning.cs
+│       ├── LightTuning.cs                    ★new per-scene brightness multiplier
 │       ├── LightmapDecoder.cs                ★new bake-data decode / gain / saturation adjustment
 │       ├── LightmapMaterialCache.cs          ★new per-lightmap material-variant management
 │       ├── LightmapDecode.shader             ★new decode shader
@@ -717,7 +671,7 @@ Assets/ResoniteSDK/
 ```
 
 ```
-Assets/Editor/                                  ← Lightmap Pipeline panel (sibling of ResoniteSDK/, all new)
+Assets/Editor/                                  ← Lightmap Bake & Send panel (sibling of ResoniteSDK/, all new)
 ├── LightmapPipelineWindow.cs                  ★new "pick preset → Bake & Send" one-button panel
 ├── LightmapTestHarness.cs                     ★new actual bake/send logic (also file-command drivable)
 ├── BakeryPresenceDefine.cs                    ★new auto-detects Bakery (BAKERY_INCLUDED)

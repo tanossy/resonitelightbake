@@ -148,13 +148,12 @@ public class ResoniteLinkWindow : EditorWindow
 
         ConvertSkybox = GUILayout.Toggle(ConvertSkybox, "Convert Skybox");
 
-        // "Force Refresh Generated Lightmaps" and "Send Tonemap Compensation (experimental)"
-        // (overlay additions, unlike Convert Skybox above which is vanilla Resonite.UnitySDK)
-        // moved to the Lightmap Pipeline panel's "Send-Time Options" section
-        // (LightmapPipelineWindow.cs's DrawSendTimeOptionsSection()), keeping this panel limited
-        // to what's actually original. Backing state (ConversionPassState
-        // .ForceRefreshGeneratedLightmaps / ToneMapCompensationState.Enabled) unchanged, just no
-        // longer written from here.
+        // "Force Refresh Generated Lightmaps" and "Send Tonemap Compensation" are overlay
+        // additions (unlike Convert Skybox above, which is vanilla Resonite.UnitySDK); their
+        // controls live in LightmapPipelineWindow.cs's Send-Time Options section instead, keeping
+        // this panel limited to what's actually original. Backing state
+        // (ConversionPassState.ForceRefreshGeneratedLightmaps / ToneMapCompensationState.Enabled)
+        // is unchanged, just no longer written from here.
 
         if (GUILayout.Button("Send Current Scene"))
             SendCurrentScene();
@@ -174,23 +173,17 @@ public class ResoniteLinkWindow : EditorWindow
 
         GUI.enabled = true;
 
-        // The "Meshes/Materials/Lightmaps Only" sends, "Retry Missing Asset URLs", and the whole
-        // DEBUGGING section (Cleanup tools, Reset conversion state, Log Messages JSON) live
-        // outside this official-looking panel rather than in it. Only the always-used controls
-        // (Connect, Send Current Scene, Realtime Mode) remain here.
+        // "Meshes/Materials/Lightmaps Only", "Retry Missing Asset URLs", and the DEBUGGING section
+        // (Cleanup tools, Log Messages JSON) live in the Lightmap Bake & Send window's
+        // "Debug / Cleanup" section instead of here, invoked via reflection through
+        // LightmapTestHarness.InvokeConnectedSdkSend() against this window's public passthrough
+        // methods below. Only the always-used controls (Connect, Send Current Scene, Realtime
+        // Mode) remain in this panel.
         //
-        // They first landed in a standalone ResoniteSDKDebugWindow.cs (menu: Resonite SDK/Open
-        // Debug Tools), but that window turned out redundant with LightmapPipelineWindow.cs
-        // (menu: Resonite SDK/Lightmap Pipeline) and has since been deleted - its buttons now
-        // live in that window's "Debug / Cleanup" section instead, called via
-        // LightmapTestHarness.cs's RetryMissingAssetURLs()/ResetConversionState()/
-        // LogMessageJSON, same as its other sections. This window's own public passthrough
-        // methods below (SendMeshesOnly/SendMaterialsOnly/SendLightmapsOnly/
-        // RetryMissingAssetURLs/ResetConversionState) are unaffected by that move - they're
-        // still invoked via reflection through LightmapTestHarness.InvokeConnectedSdkSend(),
-        // same as before. CleanupConverters() is not called this way at all - it's only ever
-        // invoked internally, from ResetConversionState() itself (see that method's own
-        // comment below); it never had (and still doesn't have) a standalone button.
+        // A ResetConversionState() button used to live there too; removed because EnsureConverter()
+        // below already calls the real ResetConversionState() automatically whenever it's needed.
+        // CleanupConverters() has no button at all - it's only ever invoked internally, from
+        // ResetConversionState() itself.
     }
 
     // Force an update, which should refresh the UI

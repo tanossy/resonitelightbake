@@ -6,52 +6,39 @@ using UnityEngine;
 // SecondaryAlbedo slot (UV1) since Renderite has no custom-shader support and MeshConverter
 // already forwards Unity's mesh.uv2 into Resonite's TexCoord1.
 //
-// This does NOT inherit from StandardBaseConverter<TWrapper, TMaterial>, because that base is
-// constrained to `TMaterial : FrooxEngine.PBS_Material`, and PBS_MultiUV_Metallic instead derives
-// from the separate PBS_MultiUV_Material hierarchy (different field set: AlbedoScale/AlbedoOffset
-// per-channel instead of a single shared TextureScale/TextureOffset). The property-by-property
-// mapping below otherwise follows the same conventions as StandardConverter/StandardBaseConverter
-// (context.GetITexture2D for all textures, Color.ToColorX_sRGB() for colors, "_EMISSION" keyword
-// gating for emissive).
+// Does not inherit from StandardBaseConverter<TWrapper, TMaterial>: that base requires
+// `TMaterial : FrooxEngine.PBS_Material`, but PBS_MultiUV_Metallic derives from the separate
+// PBS_MultiUV_Material hierarchy (per-channel AlbedoScale/AlbedoOffset instead of a single shared
+// TextureScale/TextureOffset), so the property mapping is reimplemented here.
 //
-// AlbedoColor/EmissiveColor here are routed through ColorGradingApproximation.Apply(...), for
-// consistency with StandardBaseConverter's handling of non-lightmapped materials. Without it,
-// Tonemap Compensation would have no effect on baked-lightmap materials, which make up most
-// scenes using this converter.
+// AlbedoColor/EmissiveColor go through ColorGradingApproximation.Apply(...) so Tonemap
+// Compensation still affects baked-lightmap materials, matching StandardBaseConverter's handling
+// of non-lightmapped ones.
 [MaterialConverter(false, "ResoniteSDK/BakedLightmapStandard")]
 public class BakedLightmapStandardConverter : ResoniteMaterialConverter
 {
-    // Controls the strength of an additive "ambient fill" layered on top of the multiplicative
-    // SecondaryAlbedo lightmap blend, approximating the shadow-lifting effect Unity's baked GI
-    // provides (0 = pure multiply, 1 = the old EmissiveLightmapMode=true full-additive behavior).
-    // A pure multiply blend preserves color contrast correctly but can look too dark in shadowed
-    // areas; a pure additive blend restores brightness but crushes contrast, since adding a fixed
-    // value to a dark color shrinks its ratio to a bright color far more than to a light color
-    // (e.g. a 9:1 reflectance ratio shrinks to about 2.5:1 after adding +0.3). Because of this,
-    // additive fill is kept at 0 and brightness is instead boosted upstream via
-    // LightmapDecoder.RangeScale, which preserves ratios by acting as a gain before the multiply.
+    // Strength of an additive "ambient fill" on top of the multiplicative SecondaryAlbedo
+    // lightmap blend, approximating Unity's baked-GI shadow lifting (0 = pure multiply, 1 = full
+    // additive). Kept at 0: a pure additive blend crushes contrast (adding a fixed value shrinks a
+    // dark/bright ratio far more than a light/bright one - e.g. 9:1 becomes ~2.5:1 at +0.3), so
+    // brightness is instead boosted upstream via LightmapDecoder.RangeScale, which preserves
+    // ratios by acting as a gain before the multiply.
     public static float AdditiveFillStrength = 0.0f;
 
-    // Compensates for LightConverter.IntensityMultiplier increasing light brightness: with
-    // brighter lights, the same Smoothness value produces proportionally stronger specular
-    // highlights than it did in Unity (e.g. cloth-like materials can start looking like polished
-    // metal). Applied as a multiplier on the scalar Smoothness value only - materials that use a
-    // MetallicMap (where Smoothness comes from the texture's alpha channel instead) need an
-    // equivalent attenuation baked into the texture itself when it's regenerated.
+    // Compensates for LightConverter.IntensityMultiplier: brighter lights make the same
+    // Smoothness value produce disproportionately stronger specular highlights than in Unity.
+    // Applied only to the scalar Smoothness value - a MetallicMap-driven alpha channel needs the
+    // equivalent attenuation baked into the texture itself instead.
     public static float SmoothnessCompensation = 0.05f;
 
-    // Metallic surfaces have almost no diffuse reflection, so nearly everything visible on them is
-    // specular reflection - lowering Smoothness alone only makes that reflection duller, it never
-    // stops it, and even a pure-black AlbedoColor keeps mirroring bright light sources. Smoothness
-    // compensation alone therefore can't fully tame glare on high-Metallic materials, so Metallic
-    // itself is also attenuated at send time via this multiplier.
+    // High-Metallic surfaces are almost all specular reflection, so lowering Smoothness alone
+    // only dulls the highlight without ever removing it. Metallic is attenuated separately at
+    // send time to actually tame the glare.
     public static float MetallicCompensation = 0.0f;
 
-    // Verification mode for large baked scenes. The first in-world check only needs geometry,
-    // material colors, and the baked lightmap; uploading every source albedo/normal/metallic/
-    // occlusion/emission texture can overwhelm ResoniteLink before anything appears in-world.
-    // Defaults to false since the full texture upload path (including SecondaryAlbedoTexture/URL)
-    // has been verified working.
+    // Fast-iteration mode for large scenes: skips every source texture upload (albedo/normal/
+    // metallic/occlusion/emission), sending only geometry, material colors, and the baked
+    // lightmap, so a scene appears in-world before a full texture upload could complete.
     public static bool LightmapPreviewUploadOnly = false;
 
     public PBS_MultiUV_MetallicWrapper PBS;
@@ -66,15 +53,11 @@ public class BakedLightmapStandardConverter : ResoniteMaterialConverter
         data.RenderQueue = material.renderQueue;
 
         // --- Alpha handling / culling (explicit) ---
-        // LightmapMaterialCache only ever produces this marker material for Opaque-mode ("_Mode"
-        // == 0) Standard materials (see LightmapMaterialCache's "_Mode != 0f" eligibility guard),
-        // and the marker shader itself doesn't expose a per-material Cull property (Standard is
-        // always back-face culled), so these three are hardcoded rather than derived from the
-        // source material. AlphaClip still forwards _Cutoff in case a future v2 relaxes the
-        // Opaque-only restriction, at which point AlphaHandling would need to switch based on
-        // material.GetFloat("_Mode") again. Enum values verified against
-        // BindingsGenerator/Resonite.UnitySDK.Bindings/Generated/Enums/FrooxEngine/FrooxEngine/AlphaHandling.cs
-        // and .../Culling.cs (Opaque = 0, Back = 2).
+        // LightmapMaterialCache only ever produces this marker material for Opaque-mode Standard
+        // materials, and the marker shader has no per-material Cull property (Standard is always
+        // back-face culled), so these are hardcoded rather than derived from the source material.
+        // AlphaClip still forwards _Cutoff in case a future version relaxes the Opaque-only
+        // restriction.
         data.Culling = FrooxEngine.Culling.Back;
         data.AlphaHandling = FrooxEngine.AlphaHandling.Opaque;
         data.AlphaClip = material.GetFloat("_Cutoff");
@@ -89,10 +72,9 @@ public class BakedLightmapStandardConverter : ResoniteMaterialConverter
         data.AlbedoUV = 0;
 
         // --- Normal (UV0) ---
-        // Unity's Standard shader samples the normal/occlusion/emission maps using the same
-        // uv_MainTex transform as albedo (only the detail albedo map gets its own UV2 transform),
-        // so we mirror _MainTex's ScaleOffset here rather than leaving these at their zeroed
-        // Sync<Vector2> default (which would otherwise collapse every sample to a single texel).
+        // Unity's Standard shader samples normal/occlusion/emission with the same uv_MainTex
+        // transform as albedo, so _MainTex's ScaleOffset is mirrored here rather than left at the
+        // zeroed Sync<Vector2> default (which would collapse every sample to a single texel).
         data.NormalMap = LightmapPreviewUploadOnly ? null : context.GetITexture2D(material.GetTexture("_BumpMap"));
         data.NormalScale = material.GetFloat("_BumpScale");
         data.NormalMapScale = mainTexScale;
@@ -129,18 +111,12 @@ public class BakedLightmapStandardConverter : ResoniteMaterialConverter
         data.MetallicMapUV = 0;
 
         // --- Baked lightmap (UV1) ---
-        // Written by LightmapMaterialCache from LightmapSettings.lightmaps[i].lightmapColor and
-        // renderer.lightmapScaleOffset onto this marker material's _BakedLightmap / _BakedLightmapST.
+        // Written by LightmapMaterialCache onto this marker material's _BakedLightmap /
+        // _BakedLightmapST.
         var bakedLightmap = context.GetITexture2D(material.GetTexture("_BakedLightmap"));
-        // Desaturated (luma-only) companion, see LightmapMaterialCache/LightmapDecoder's
-        // desaturate doc comments - used for the additive fill below so per-object baked-lightmap
-        // hue (window=cool, lamp=warm) doesn't leak into the brightness-only approximation.
-        //
-        // Only fetched/uploaded when the additive fill is actually enabled - see
-        // AdditiveFillStrength's doc comment and the matching guard in
-        // LightmapMaterialCache.GetVariantOrOriginalInner. At AdditiveFillStrength=0 this texture
-        // contributes nothing (SecondaryEmissiveColor below is pure black), so uploading it would
-        // be pure network waste.
+        // Desaturated (luma-only) companion for the additive fill below, so per-object lightmap
+        // hue doesn't leak into the brightness-only approximation. Only fetched when the additive
+        // fill is enabled - at AdditiveFillStrength=0 it would contribute nothing.
         var bakedLightmapGray = AdditiveFillStrength > 0f
             ? context.GetITexture2D(material.GetTexture("_BakedLightmapGray"))
             : null;
@@ -155,14 +131,11 @@ public class BakedLightmapStandardConverter : ResoniteMaterialConverter
         data.SecondaryAlbedoOffset = lightmapOffset;
         data.SecondaryAlbedoUV = 1;
 
-        // Additive half: a damped, desaturated copy of the same data, approximating the ambient
-        // fill Unity's baked GI would otherwise provide (Resonite has no baked-GI pipeline of its
-        // own). AdditiveFillStrength=0 recovers the old pure-multiply behavior; 1 recovers the old
-        // pure-additive (EmissiveLightmapMode=true) behavior applied on top of the multiply.
-        // Desaturated rather than full-color: the raw baked lightmap carries each object's own
-        // local color (window-side=cool, lamp-side=warm), and adding that directly made
-        // differently-lit objects (couch near the window vs. bed near the lamp) diverge in hue
-        // from each other in a way Unity's actual GI light transport never does.
+        // Additive half: a damped, desaturated copy approximating the ambient fill Unity's baked
+        // GI would provide (Resonite has no baked-GI pipeline of its own). Desaturated because the
+        // raw lightmap carries each object's own local color cast (e.g. window-side cool,
+        // lamp-side warm); adding that directly made differently-lit objects diverge in hue in a
+        // way real GI light transport never does.
         data.SecondaryEmissiveMap = bakedLightmapGray;
         data.SecondaryEmissionMapScale = lightmapScale;
         data.SecondaryEmissionMapOffset = lightmapOffset;

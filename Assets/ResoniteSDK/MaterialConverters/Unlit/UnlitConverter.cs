@@ -31,7 +31,6 @@ public class UnlitTransparentConverter : ResoniteMaterialConverter
 
         data.RenderQueue = material.renderQueue;
 
-        // Make sure we have proper tint color set
         if (material.shader.name == "Unlit/Color" ||
             material.shader.name == "Particles/Standard Unlit")
             data.TintColor = material.GetColor("_Color").ToColorX_sRGB();

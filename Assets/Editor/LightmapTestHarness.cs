@@ -1,77 +1,75 @@
 // LightmapTestHarness.cs
 //
-// ライトマップベイク・パイプラインの実処理。LightmapPipelineWindow.csから呼ばれるほか、
-// ファイル経由（下記コマンド）でも外部から駆動できる。
+// Implements the lightmap bake pipeline. Called by LightmapPipelineWindow.cs, and also
+// drivable from an external process (e.g. an AI agent) via a polling command file:
 //
-// アテナ（外部プロセス）がファイル経由でこの Editor を駆動できるようにする:
-//   コマンド:   <ProjectRoot>/Temp/lightmap_harness_cmd.txt
-//                 "build_scene"
-//                 "bake [texelsPerUnit] [giSamples] [current]"  (Bakery専用・単発)
-//                 "report"
-//                 "convert"
-//                 "pipeline <low|mid|high> [bakery|unity] [normal] [current]"
-//                                                                (準備->ベイク->完了イベントで自動convert。
-//                                                                 quality省略時mid、baker省略時bakery)
+//   Command file: <ProjectRoot>/Temp/lightmap_harness_cmd.txt
+//                   "build_scene"
+//                   "bake [texelsPerUnit] [giSamples] [current]"  (Bakery only, single bake)
+//                   "report"
+//                   "convert"
+//                   "pipeline <low|mid|high> [bakery|unity] [normal] [current]"
+//                                                (prepare -> bake -> auto-convert on finish;
+//                                                 quality defaults to mid, baker to bakery)
 //
-//               "current" トークン（bake / bake_unity / pipeline、順不同でどこに置いてもよい）:
-//                 指定すると EnsureTestSceneOpen() を呼ばず、現在Unityで開いているシーンを
-//                 そのままベイク対象にする（シーン切替なし）。省略時は従来どおり
-//                 Assets/LightmapTest.unity を強制的に開く（テスト部屋固定・後方互換）。
-//                 例: "bake_unity high current"
-//   結果ログ:   <ProjectRoot>/Temp/lightmap_harness_result.txt (追記、[HH:mm:ss] タイムスタンプ付き)
+//                 "current" token (bake / bake_unity / pipeline, any position): bakes whatever
+//                 scene is already open instead of force-opening Assets/LightmapTest.unity.
+//                 e.g. "bake_unity high current"
+//   Result log:   <ProjectRoot>/Temp/lightmap_harness_result.txt (appended, "[HH:mm:ss]"-prefixed)
 //
-// 併設ファイル（同じく Assets/Editor 配下、SDK非改変）:
-//   - BakeryTempObjectSuppression.cs : "!ftraceLightmaps"(ftLightmapsStorage) をSDKの正規
-//     ConversionSupressionHandler機構でシーン変換から除外する追加コンバータ。
-//   - LightmapPipelineWindow.cs      : 本ファイルの static メソッドを呼ぶだけの薄いGUI層
-//     （メニュー "Resonite SDK/Lightmap Pipeline"）。ロジックは全て本ファイル側に集約。
+// Companion files (also under Assets/Editor, none of which modify the SDK):
+//   - BakeryTempObjectSuppression.cs : excludes "!ftraceLightmaps" (ftLightmapsStorage) from
+//     scene conversion via the SDK's own ConversionSupressionHandler mechanism.
+//   - LightmapPipelineWindow.cs      : thin GUI layer over this file's static methods
+//     (menu "Resonite SDK/Lightmap Bake & Send"). All logic lives here.
 //
-// 参照 API の実在確認元（推測禁止・すべて実ソースを読んで確認済み）:
+// Referenced API surface (confirmed by reading the actual source, never assumed):
 //   - Bakery: Assets/Editor/x64/Bakery/scripts/ftRenderLightmap.cs
 //       public static ftRenderLightmap instance;
-//       public static void RenderLightmap()                         (メニューエントリ。instance を生成/表示)
-//       public void RenderButton(bool showMsgWindows = true)        (実ベイク開始。showMsgWindows=false でダイアログ抑制)
-//       public static event System.EventHandler OnFinishedFullRender (ベイク完了通知)
+//       public static void RenderLightmap()                          (menu entry; creates/shows instance)
+//       public void RenderButton(bool showMsgWindows = true)         (starts the bake; false suppresses dialogs)
+//       public static event System.EventHandler OnFinishedFullRender (bake-finished notification)
 //       public static bool bakeInProgress
 //       public static RenderDirMode renderDirMode  { None, BakedNormalMaps, DominantDirection, RNM, SH, MonoSH }
 //       public float texelsPerUnit = 20;  public int giSamples = 16;
 //       public RenderMode userRenderMode = RenderMode.FullLighting;
 //     asmdef: Assets/Editor/x64/Bakery/scripts/BakeryEditorAssembly.asmdef
 //       ("includePlatforms": ["Editor"], "autoReferenced": true)
-//       → autoReferenced=true のため、既定アセンブリ(Assembly-CSharp-Editor)からは
-//         参照追加なしで ftRenderLightmap を直接呼べる。本ファイルにも同様の enclosing
-//         asmdef が存在しない(Assets/Editor直下はBakeryのx64/Bakery/scripts配下ではない)ため
-//         既定アセンブリでコンパイルされ、同じ理屈で到達可能。
+//       -> autoReferenced=true means the default assembly (Assembly-CSharp-Editor) can call
+//          ftRenderLightmap directly with no reference added. This file has no enclosing asmdef
+//          either (Assets/Editor isn't under Bakery's own asmdef folder), so it compiles into
+//          the same default assembly and reaches Bakery the same way.
 //
 //   - Resonite.UnitySDK: Assets/ResoniteSDK/Editor/Managers/ResoniteLinkWindow.cs
 //                        Assets/ResoniteSDK/Editor/SceneConverter.cs
 //       public class ResoniteLinkWindow : EditorWindow
 //         public ConnectionState State { Disconnected, Connecting, Initializing, Connected }
 //         public string UniqueSessionId; public LinkInterface Link;
-//         private void SendCurrentScene() → EnsureConverter(); _converter.ConvertScene();
-//         private void ConnectPressed()   → Manual/AutoDiscovery 問わず Port フィールドと
-//                                            ws://localhost:{Port} で接続を試みる
-//       ResoniteSDK 配下に asmdef が存在しないため、これも既定アセンブリでコンパイルされ、
-//       本ハーネスと同一アセンブリ内 → 型を直接参照可能（SendCurrentScene 等の private
-//       メンバのみリフレクション経由で呼び出す）。
+//         private void SendCurrentScene() -> EnsureConverter(); _converter.ConvertScene();
+//         private void ConnectPressed()   -> connects to ws://localhost:{Port} regardless of
+//                                            Manual/AutoDiscovery
+//       ResoniteSDK has no asmdef either, so it also compiles into the default assembly and its
+//       types are directly reachable from this harness (only private members, e.g.
+//       SendCurrentScene, need reflection).
 //
-// --- BAKERY_INCLUDED 条件コンパイル（Bakery非導入環境でも本ファイルがコンパイルできるように）---
+// --- BAKERY_INCLUDED conditional compilation (so this file still compiles without Bakery) ---
 //
-// Bakery型（ftRenderLightmap / BakerySkyLight / BakeryDirectLight / BakeryPointLight /
-// ftLightmaps / ftGlobalStorage）を直接参照する箇所はすべて `#if BAKERY_INCLUDED` で
-// ガードしてある。このシンボルは Assets/Editor/BakeryPresenceDefine.cs
-// （[InitializeOnLoad]、Bakery型を一切直接参照せず AppDomain 走査のみで存在検出）が
-// エディタ起動時/スクリプトリロード時に自動で立てる/降ろす — 手動設定は不要。
+// Every reference to a Bakery type (ftRenderLightmap / BakerySkyLight / BakeryDirectLight /
+// BakeryPointLight / ftLightmaps / ftGlobalStorage) is guarded by `#if BAKERY_INCLUDED`. That
+// symbol is set/cleared automatically by Assets/Editor/BakeryPresenceDefine.cs ([InitializeOnLoad],
+// detects Bakery's presence via an AppDomain scan without referencing any Bakery type directly)
+// on editor startup/script reload - no manual setup needed.
 //
-// ガード方針（呼び出し元を変更せずに済むよう、公開シグネチャは常に維持する）:
-//   - LightmapPipelineWindow.cs から呼ばれる public メソッド（StartBake /
-//     ConvertUnityLightsToBakeryLights）は「シグネチャそのまま・本体だけ #if/#else」。
-//     #else 側は Bakery型に一切触れず AppendResult でユーザーに導入を促して安全に return。
-//   - Bakery専用の内部ヘルパ（ForceRTXMode / LogActualFtraceExe）はメソッドごと丸ごと
-//     #if で囲む（呼び出し元も同じ #if ブロック内にしか存在しないため #else 不要）。
-//   - BuildLights() は Unity標準のSun/Cornerライト生成をガード外に残し、
-//     BakerySkyLight生成 + ConvertUnityLightsToBakeryLights() 呼び出しだけをガードする
-//     （Unity Standard経路の生成物に影響を与えないため）。
+// Guarding policy (public signatures never change, so callers don't have to):
+//   - Public methods called from LightmapPipelineWindow.cs (StartBake /
+//     ConvertUnityLightsToBakeryLights) keep their signature and guard only the body with
+//     #if/#else; the #else branch never touches a Bakery type and safely returns after logging
+//     via AppendResult.
+//   - Bakery-only internal helpers (ForceRTXMode / LogActualFtraceExe) are guarded as whole
+//     methods (their only callers live in the same #if block, so no #else is needed).
+//   - BuildLights() leaves Unity's own Sun/Corner light generation outside the guard and only
+//     guards the BakerySkyLight creation + ConvertUnityLightsToBakeryLights() call (so the Unity
+//     Standard path's output is unaffected).
 //
 using System;
 using System.Collections.Generic;
@@ -134,11 +132,11 @@ public static class LightmapTestHarness
 
     const string SceneAssetPath = "Assets/LightmapTest.unity";
 
-    // Brick Project Studio アセット（実在確認済み: guid付きprefab/materialを直接パス指定）
+    // Brick Project Studio assets (confirmed to exist; prefab/material paths hardcoded by guid).
     const string BpsFloorPrefabPath = "Assets/Brick Project Studio/_BPS Basic Assets/_Prefabs/Basic Asset/BA Build Kit/Interior/Int_01/Int_BA_01_Floor_01.prefab";
     const string BpsWallPrefabPath = "Assets/Brick Project Studio/_BPS Basic Assets/_Prefabs/Basic Asset/BA Build Kit/Interior/Int_01/Int_BA_01_Wall_01.prefab";
     const string BpsMaterialPath = "Assets/Brick Project Studio/_BPS Basic Assets/Common/Materials/Basic Assets/Int_BS_01.mat";
-    // Int_BA_01_Floor_01 / Int_BA_01_Wall_01 が参照するメッシュの出所FBX（Lightmap UV有効化対象）
+    // Source FBX for the meshes Int_BA_01_Floor_01 / Int_BA_01_Wall_01 reference (needs Lightmap UVs enabled).
     const string BpsFloorFbxPath = "Assets/Brick Project Studio/_BPS Basic Assets/Common/Models/Build Kits/Build Kit Interior - 01.fbx";
     const string BpsWallFbxPath = "Assets/Brick Project Studio/_BPS Basic Assets/Common/Models/Build Kits/Build Kit Interior Updated_01.fbx";
 
@@ -372,10 +370,9 @@ public static class LightmapTestHarness
                     // which is pointless until the Unity bake itself is confirmed good).
                     //
                     // Optional trailing "normal" token (e.g. "bake_unity mid normal") opts into
-                    // the experimental directional/normal-bake path (Step 1) from the file-driven
-                    // harness interface, without requiring the interactive
-                    // LightmapPipelineWindow toggle+confirmation-dialog — useful for Athena-driven
-                    // real-machine verification. Bare "bake_unity [quality]" is unchanged.
+                    // the experimental directional/normal-bake path from the file-driven harness
+                    // interface, without requiring the interactive LightmapPipelineWindow toggle +
+                    // confirmation dialog. Bare "bake_unity [quality]" is unchanged.
                     //
                     // Optional "current" token (anywhere, e.g. "bake_unity high current" or
                     // "bake_unity high normal current") opts into baking whatever scene is
@@ -793,27 +790,22 @@ public static class LightmapTestHarness
     // Adds the Bakery-native light component matching each UnityEngine.Light in the
     // scene, copying color/intensity across.
     //
-    // Root cause (per coordinator's real-machine finding, confirmed by reading source):
-    // Bakery's tracer NEVER reads plain UnityEngine.Light components. It only collects
-    // lights via (ftRenderLightmap.cs lines 4888, 4998-4999):
+    // Root cause: Bakery's tracer NEVER reads plain UnityEngine.Light components. It only
+    // collects lights via (ftRenderLightmap.cs lines 4888, 4998-4999):
     //   FindObjectsOfType(typeof(BakeryDirectLight))
     //   FindObjectsOfType(typeof(BakeryPointLight))
     //   FindObjectsOfType(typeof(BakerySkyLight))
     // and ftBuildLights.BuildDirectLight()/BuildPointLight() read straight from those
-    // components' own `color`/`intensity` fields (BakeryDirectLight.cs, BakeryPointLight.cs),
-    // never from a paired Light. A scene with only Light components + lightmapBakeType=Baked
-    // has ZERO light sources as far as Bakery is concerned, which is exactly why the bake
-    // came back all-black.
+    // components' own `color`/`intensity` fields, never from a paired Light. A scene with only
+    // Light components + lightmapBakeType=Baked has ZERO light sources as far as Bakery is
+    // concerned - exactly why an unconverted bake comes back all-black.
     //
-    // NOTE: We searched the entire installed Bakery source tree (Assets/Editor/x64/Bakery/scripts
-    // and Assets/Bakery) for an official "Convert Unity lights to Bakery lights" menu/utility —
-    // there is NO MenuItem and no class/method with "Convert"+"Light" in its name anywhere in
-    // this Bakery version (grep across both folders: zero matches). The bidirectional
-    // color/intensity sync code that DOES exist (ftDirectLightInspector.cs ~line 128-158,
-    // 594-630) is an editor-inspector-only convenience for a Light placed alongside a
-    // BakeryDirectLight for realtime-GI use; it is not invoked at bake time and not a
-    // reusable public API. So instead of calling a nonexistent utility, we add the
-    // equivalent Bakery components ourselves here, using only confirmed public fields.
+    // No official "Convert Unity lights to Bakery lights" utility exists in this Bakery version
+    // (confirmed via source search: no matching MenuItem or method name anywhere in
+    // Assets/Editor/x64/Bakery/scripts or Assets/Bakery). The bidirectional sync code that does
+    // exist (ftDirectLightInspector.cs) is an editor-inspector-only convenience for realtime-GI
+    // use, not invoked at bake time and not a reusable API - so this method adds the equivalent
+    // Bakery components itself, using only confirmed public fields.
     public static void ConvertUnityLightsToBakeryLights()
     {
 #if BAKERY_INCLUDED
@@ -916,8 +908,8 @@ public static class LightmapTestHarness
         if (!EnsureBakeSceneReady(useCurrentSceneInsteadOfTestRoom))
             return;
 
-        // Counterpart of Convert()'s disable step: a previous send leaves scene lights off,
-        // and a disabled light contributes nothing to the bake — re-enable before baking.
+        // Defensive: a disabled light contributes nothing to the bake, so make sure every
+        // light is enabled first (no-op if they already are).
         SetSceneLightsEnabled(true);
 
         // Poiyomi materials never receive a baked lightmap (LightmapMaterialCache only
@@ -955,16 +947,13 @@ public static class LightmapTestHarness
         instance.texelsPerUnit = texelsPerUnit;
         instance.giSamples = giSamples;
 
-        // 2026-08-08 (Tanossy指摘): FullLightingは直接光+間接光の両方をライトマップへ焼き込む
-        // ため、Resonite側で実ライト(LightConverter経由)も生かすと二重に光ることになる
-        // (これが2026-07-11のDouble-lighting fix、Convert()側でSetSceneLightsEnabled(false)して
-        // いた本来の理由)。今回「Unityの実ライト点灯時の見た目にResoniteを近づけたい」という
-        // 要望に対応するため、Indirectモード(間接光/GIバウンスのみベイク)に切り替え、直接光は
-        // 常時有効なUnityEngine.Lightをそのまま実ライトとしてResoniteへ送ることで賄う。
-        // BakeryPointLight/BakeryDirectLightのbakeToIndirectは両方デフォルトfalseのままでよい
-        // (Indirectモードで各ライト自身の直接寄与は焼き込まれず、GIバウンスだけが焼き込まれる —
-        // Unity公式のMixed/Baked Indirectと同じ考え方)。Convert()側のライト無効化ステップも
-        // このタイミングで撤去する。
+        // FullLighting bakes both direct and indirect light into the lightmap; since Resonite's
+        // real lights (sent via LightConverter) stay enabled too, that would double the direct
+        // contribution. Indirect mode bakes only the GI bounce, so the always-on UnityEngine.Light
+        // supplies the direct light on the Resonite side instead. BakeryPointLight/
+        // BakeryDirectLight's bakeToIndirect can stay at its false default (same semantics as
+        // Unity's own Mixed/Baked Indirect: indirect mode never bakes a light's own direct
+        // contribution, only its GI bounce).
         instance.userRenderMode = ftRenderLightmap.RenderMode.Indirect;
 
         ForceRTXMode();
@@ -1092,8 +1081,8 @@ public static class LightmapTestHarness
         if (!EnsureBakeSceneReady(useCurrentSceneInsteadOfTestRoom))
             return;
 
-        // Counterpart of Convert()'s disable step: a previous send leaves scene lights off,
-        // and a disabled light contributes nothing to the bake — re-enable before baking.
+        // Defensive: a disabled light contributes nothing to the bake, so make sure every
+        // light is enabled first (no-op if they already are).
         SetSceneLightsEnabled(true);
 
         // See the matching comment in StartBake() above — same Poiyomi->Standard standin
@@ -1125,7 +1114,7 @@ public static class LightmapTestHarness
         settings.aoExponentDirect = 1f;
         settings.aoExponentIndirect = 1.5f;
 
-        // "法線を焼き込む（実験的）" Step 1: directional lightmap mode. Explicit in BOTH branches
+        // "Bake normal detail into lightmap (experimental)" Step 1: directional lightmap mode. Explicit in BOTH branches
         // (not just the ON one) so a LightingSettings asset that was left CombinedDirectional by
         // a previous ON bake doesn't silently stay directional the next time this runs with
         // bakeNormalDetail=false — OFF must always mean "exactly today's NonDirectional bake",
@@ -1225,12 +1214,11 @@ public static class LightmapTestHarness
         // sets foundCompatibleSetup=false instead). Detection results (runsRTX6 etc.)
         // are already populated in gstorage, so mark them as valid for this GPU.
         gstorage.gpuName_2 = SystemInfo.graphicsDeviceName;
-        // Real-machine result (2026-07-10): ftraceRTX.exe (the OptiX 6 build selected
-        // when runsRTX6==true) fails on this system with "Error (1546): Failed to load
-        // OptiX library" — current NVIDIA drivers no longer ship the OptiX 6 ABI.
-        // ftraceRTX9.exe (OptiX 9 build) is the correct binary for modern GPUs/drivers,
-        // so force the runsRTX6 flag off; TestSystemSpecs() then picks ftraceExe9.
-        // (runsRTX6==true was a stale/corrupted detection result to begin with.)
+        // ftraceRTX.exe (the OptiX 6 build selected when runsRTX6==true) fails with "Error
+        // (1546): Failed to load OptiX library" on current NVIDIA drivers, which no longer ship
+        // the OptiX 6 ABI. ftraceRTX9.exe (OptiX 9) is the correct binary for modern GPUs, so
+        // force runsRTX6 off (it was a stale/corrupted detection result) and let
+        // TestSystemSpecs() pick ftraceExe9.
         gstorage.runsRTX6 = false;
         EditorUtility.SetDirty(gstorage);
 
@@ -1241,14 +1229,12 @@ public static class LightmapTestHarness
         if (ftRenderLightmap.instance != null)
             ftRenderLightmap.instance.denoise = false;
 
-        // Real-machine result (2026-07-10, attempt 6): setting the gstorage flags via
-        // this method is NOT sufficient. RenderLightmap() (window creation, called
-        // before ForceRTXMode) already runs Bakery's RTX auto-enable with the values
-        // current at that moment: it sets the static rtxMode=true and picked
-        // ftraceExe from the then-stale runsRTX6. Once rtxMode is true,
-        // TestSystemSpecs()'s `!rtxMode` gate never re-picks the binary, so our flag
-        // updates above are ignored for this session. Deterministic fix: assign the
-        // private static `ftraceExe` directly via reflection.
+        // Setting the gstorage flags above is NOT sufficient on its own: RenderLightmap()
+        // (called before ForceRTXMode, during window creation) already ran Bakery's RTX
+        // auto-enable using the pre-update values, setting the static rtxMode=true and picking
+        // ftraceExe from the stale runsRTX6. Once rtxMode is true, TestSystemSpecs()'s
+        // `!rtxMode` gate never re-picks the binary, so the flag updates above are ignored for
+        // this session — assign the private static `ftraceExe` directly via reflection instead.
         try
         {
             ftRenderLightmap.rtxMode = true;
@@ -1387,10 +1373,9 @@ public static class LightmapTestHarness
         }
     }
 
-    // Invoked from OnBakeFinished/OnUnityBakeFinished after Report(). Convert() already
-    // logs a full, safe "Resonite not connected" explanation and returns without throwing
-    // when the SDK isn't connected — so this satisfies "SDK未接続なら手順ログ出して安全終了"
-    // with no extra handling needed here.
+    // Invoked from OnBakeFinished/OnUnityBakeFinished after Report(). Convert() already logs a
+    // full, safe "Resonite not connected" explanation and returns without throwing when the SDK
+    // isn't connected, so no extra handling is needed here.
     static void MaybeContinuePipeline()
     {
         if (!_pipelineChainConvert)
@@ -1435,15 +1420,12 @@ public static class LightmapTestHarness
 #endif
     }
 
-    // Bug fix: this used to call EnsureTestSceneOpen() unconditionally, which force-switches
-    // the active scene to the test room. Report() runs from OnBakeFinished()/
-    // OnUnityBakeFinished() BEFORE MaybeContinuePipeline()'s chained Convert()/send step, so
-    // a "Bake & Send" run that correctly baked whatever scene the user had open would get its
-    // active scene yanked away to the test room by this call right before the send - meaning
-    // Convert() would send the WRONG (test room) scene instead of the one that was actually
-    // baked. Report() now respects the same scene-selection mode the triggering bake used
-    // (_lastUsedCurrentScene, set alongside _lastBaker in StartBake()/StartBakeUnity()) via
-    // EnsureBakeSceneReady(), instead of always forcing the test room open.
+    // Must respect the same scene-selection mode the triggering bake used
+    // (_lastUsedCurrentScene, set alongside _lastBaker in StartBake()/StartBakeUnity()), via
+    // EnsureBakeSceneReady(), rather than unconditionally force-opening the test room: Report()
+    // runs from OnBakeFinished()/OnUnityBakeFinished() BEFORE MaybeContinuePipeline()'s chained
+    // Convert()/send step, so force-opening the test room here would yank the active scene away
+    // right before the send, causing Convert() to send the wrong scene.
     public static void Report()
     {
         if (!EnsureBakeSceneReady(_lastUsedCurrentScene))
@@ -1502,8 +1484,8 @@ public static class LightmapTestHarness
     // (no RGBM decode), so these numbers are raw stored channel values, not true
     // radiance. That's still sufficient to answer "is it all zero" (a black bake
     // encodes to ~(0,0,0[,0]) either way) — for a physically accurate luminance value,
-    // decode via the platform's DecodeLightmap logic (out of scope here; Athena can do
-    // the exact check against BakeryLightmaps/*.hdr directly with Python).
+    // decode via the platform's DecodeLightmap logic (out of scope here; check
+    // BakeryLightmaps/*.hdr directly with an external tool if that's ever needed).
     static string SamplePixelStats(Texture2D tex)
     {
         if (tex == null) return "no texture";
@@ -1643,13 +1625,10 @@ public static class LightmapTestHarness
 
         try
         {
-            // 2026-08-08 (Tanossy指摘、設計変更): 2026-07-11のDouble-lighting fixでは
-            // FullLighting(直接+間接光を両方ベイク)を前提に、送信直前にライトを無効化して
-            // 二重発光を防いでいた。StartBake()をIndirectモード(間接光のみベイク)へ切り替えた
-            // ことでこの前提が崩れたため、無効化ステップ自体を撤去する — 直接光はもう
-            // ライトマップに含まれないので、実ライト(LightConverter経由)を常時有効なまま送って
-            // Resonite側で直接光を担わせる。これによりUnityの「実ライト点灯時」の見た目に
-            // Resonite側も近づく設計になる。
+            // Real Resonite lights (via LightConverter) are sent while still enabled, deliberately:
+            // StartBake() bakes in Indirect mode (GI bounce only), so the lightmap carries no
+            // direct-light contribution and there's nothing left to double by leaving the scene's
+            // real lights on. This also keeps the Resonite result closer to Unity's own lit look.
             //
             // SendCurrentScene() is private on ResoniteLinkWindow (see ResoniteLinkWindow.cs);
             // it calls EnsureConverter() then SceneConverter.ConvertScene() internally.
@@ -1687,12 +1666,11 @@ public static class LightmapTestHarness
         InvokeConnectedSdkSend("SendMaterialsOnly", "Convert Materials Only");
     }
 
-    // 2026-08-08 (Tanossy指摘): UnityMCP(MCP for Unity、独自HTTPサーバー+JSON-RPCをUnity Editor
-    // プロセス内で常駐させる「被せるプラグイン」)経由でのexecute_code呼び出しを介さず、この
-    // ファイルポーリング式ハーネス（Temp/lightmap_harness_cmd.txtをEditorApplication.updateで
-    // 監視するだけの、常駐HTTPサーバーを持たない軽量な仕組み）だけでSDKの送信を駆動できるように
-    // するための追加。ResoniteLink.dll側の未同期レースコンディション(2026-07-30ソース読解で確定済み)
-    // が、UnityMCPの常駐サーバーとの相互作用で再現しやすくなっている可能性を切り分けるのが狙い。
+    // Deliberately reachable via this lightweight file-polling harness (EditorApplication.update
+    // watching Temp/lightmap_harness_cmd.txt, no resident HTTP server) rather than only through
+    // MCP for Unity's execute_code call, which keeps its own persistent HTTP+JSON-RPC server
+    // running inside the Editor process — isolates whether that resident server makes
+    // ResoniteLink.dll's known unsynchronized race condition easier to reproduce.
     public static void ConvertLightmapsOnly()
     {
         InvokeConnectedSdkSend("SendLightmapsOnly", "Convert Lightmaps Only");
@@ -1706,20 +1684,12 @@ public static class LightmapTestHarness
         InvokeConnectedSdkSend("RetryMissingAssetURLs", "Retry Missing Asset URLs");
     }
 
-    // Wraps ResoniteLinkWindow.ResetConversionState() (destroys the scene's converters +
-    // __UnityAssets/__UnitySkybox roots and starts the conversion state fresh - see that method's
-    // own doc comment on ResoniteLinkWindow.cs for the full history/rationale). Deliberately not
-    // given a "CleanupConverters"/"CleanupReosniteComponents" counterpart here:
-    // ResetConversionState() already calls CleanupConverters() internally, and
-    // CleanupReosniteComponents() was found to be fully redundant (it double-destroyed components
-    // already torn down by the CleanupConverters()/root-destruction chain - see the note on
-    // ResoniteLinkWindow.ResetConversionState()'s own comment). With "always Reset before
-    // re-sending" as the assumed workflow, standalone buttons for either of those two would never
-    // do anything ResetConversionState() doesn't already cover.
-    public static void ResetConversionState()
-    {
-        InvokeConnectedSdkSend("ResetConversionState", "Reset Conversion State");
-    }
+    // ResetConversionState()/ClearGeneratedLightmapVariants() wrappers removed along with their
+    // buttons: ResoniteLinkWindow.EnsureConverter() already self-heals automatically (it resets
+    // whenever the session ID/port changes, or the converter's IsCorrupted flag is set - which is
+    // exactly what a timeout or mid-send disconnect does), and SceneConverter.ConvertScene()
+    // already calls LightmapMaterialCache.ClearGeneratedLightmapVariants() whenever "Force
+    // Refresh Generated Lightmaps" is on.
 
     // Mirrors ResoniteLinkWindow.LogMessageJSON, a plain public bool field (not a method), so
     // LightmapPipelineWindow's Debug/Cleanup toggle doesn't need to reach into
@@ -1741,20 +1711,6 @@ public static class LightmapTestHarness
             if (window != null)
                 window.LogMessageJSON = value;
         }
-    }
-
-    // Thin wrapper around LightmapMaterialCache.ClearGeneratedLightmapVariants() (deletes
-    // Assets/ResoniteSDK/Generated/LightmapVariants - see that method's own doc comment) so
-    // LightmapPipelineWindow's Debug/Cleanup section can call it the same way it calls every other
-    // action in this file, keeping with this file's "no logic in the GUI layer" header comment.
-    // Unlike RetryMissingAssetURLs()/ResetConversionState() above, this never touches
-    // ResoniteLinkWindow/PickResoniteLinkWindow() at all - it's purely local to the Unity project
-    // (deletes generated .mat/.png assets on disk), so it needs no SDK connection and is safe to
-    // call regardless of ResoniteLinkWindow.State.
-    public static void ClearGeneratedLightmapVariants()
-    {
-        LightmapMaterialCache.ClearGeneratedLightmapVariants();
-        AppendResult("Clear Generated Lightmap Variants: done.");
     }
 
     static void InvokeConnectedSdkSend(string methodName, string label)
@@ -1791,11 +1747,9 @@ public static class LightmapTestHarness
         }
     }
 
-    // Enables/disables every Light component in the active scene. Returns how many
-    // components actually changed state. Used by the enable->bake->disable->send cycle
-    // (see the comments in Convert() / StartBake() / StartBakeUnity()); FindObjectsOfType
-    // skips inactive GameObjects, which is fine — a light on an inactive object neither
-    // bakes nor converts, so it needs no toggling.
+    // Enables/disables every Light component in the active scene. Returns how many components
+    // actually changed state. FindObjectsOfType skips inactive GameObjects, which is fine — a
+    // light on an inactive object neither bakes nor converts, so it needs no toggling.
     static int SetSceneLightsEnabled(bool enabled)
     {
         int changed = 0;

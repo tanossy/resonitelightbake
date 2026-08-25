@@ -13,7 +13,8 @@ public static class EmitterHelper
         emitter.Enabled = emission.enabled;
         emitter.System = system;
 
-        // TODO!!! Handle other styles?
+        // TODO: only rateOverTime's constant mode is handled; other emission rate modes (curve,
+        // rateOverDistance, bursts) are not yet converted.
         emitter.Rate = emission.rateOverTime.constant;
     }
 }
@@ -82,12 +83,9 @@ public class ParticleSystemConverter : ResoniteComponentConverter<UnityEngine.Pa
     {
         if (wrapper == null)
         {
-            // Remove any previous emitters
             CleanupEmitters();
 
             wrapper = gameObject.AddComponent<TWrapper>();
-
-            // Assign the system
             wrapper.Data.System = ParticleSystem.Data;
         }
 
@@ -105,7 +103,8 @@ public class ParticleSystemConverter : ResoniteComponentConverter<UnityEngine.Pa
         var color = EnsureModule<ColorRangeInitializer, ColorRangeInitializerWrapper>(ref ColorRangeInitializer);
         var speed = EnsureModule<SpeedRangeInitializer, SpeedRangeInitializerWrapper>(ref SpeedRangeInitializer);
 
-        var position = EnsureModule<PositionSimulatorModule, PositionSimulatorModuleWrapper>(ref PositionSimulator);
+        // PositionSimulatorModule is unconditionally required for particles to actually move.
+        EnsureModule<PositionSimulatorModule, PositionSimulatorModuleWrapper>(ref PositionSimulator);
 
         system.Enabled = true;
         system.persistent = true;
@@ -118,14 +117,9 @@ public class ParticleSystemConverter : ResoniteComponentConverter<UnityEngine.Pa
         system.MaxParticleCount = main.maxParticles;
         system.Style = style;
 
-        // NOTE: SimulationSpace intentionally left untouched (Default = WorldRoot).
-        // Emission position comes from the emitter's resolved world transform via normal
-        // slot parenting, independent of this setting — two known-good native Resonite
-        // fire assets (checked live: "Base Scene/VFX/Particles" and root "PhotonDust Fire")
-        // both render correctly with SimulationSpace at its untouched WorldRoot default.
-        // An earlier attempt to set LocalSpace/UseParentSpace here made the fire disappear
-        // entirely (verified: reverted). If a real per-emitter simulation-space need turns
-        // up later, re-derive it from a working example instead of guessing again.
+        // NOTE: SimulationSpace intentionally left untouched (Default = WorldRoot). Setting it to
+        // LocalSpace/UseParentSpace made particles disappear entirely in testing; emission
+        // position already comes from the emitter's resolved world transform via slot parenting.
 
         // Lifetime
         switch (main.startLifetime.mode)
@@ -270,10 +264,8 @@ public class ParticleSystemConverter : ResoniteComponentConverter<UnityEngine.Pa
                 sphere.Radius = shape.radius;
                 break;
 
-            // BoxShell/BoxEdge weren't previously matched by this switch at all (silently no
-            // emitter created for assets using them) — the EmitFromShell line below already
-            // assumed it could see BoxShell, but that was unreachable dead code since the case
-            // label above only matched plain Box. Same bug class as Cone (see above).
+            // BoxShell and BoxEdge must be matched here too, or assets using them silently get
+            // no emitter at all (EmitFromShell below only has meaning once these cases match).
             case ParticleSystemShapeType.Box:
             case ParticleSystemShapeType.BoxShell:
             case ParticleSystemShapeType.BoxEdge:
@@ -304,21 +296,13 @@ public class ParticleSystemConverter : ResoniteComponentConverter<UnityEngine.Pa
                 circle.Scale = Vector2.one;
                 break;
 
-            // Unity has 4 distinct Cone variants (verified via ps.shape.shapeType, raw enum
-            // values Cone=4/ConeShell=7/ConeVolume=8/ConeVolumeShell=9). Only the two "Volume"
-            // variants actually spawn particles distributed along the cone's length; plain
-            // Cone/ConeShell emit from the flat base disc only, and `length` there merely
-            // shapes the velocity spread (the base is treated as if `length` units in front of
-            // an implicit apex — narrower length = wider effective spread for the same angle).
-            // Previously `Height` was set to `shape.length` unconditionally, which for a plain
-            // Cone (this asset's actual type) turned a point-like base emission into particles
-            // scattered across a `length`-meter-tall volume (a real Unity asset had length=5,
-            // i.e. a 5-METER spawn volume for a candle flame) — this was the root cause of the
-            // original "particles stretched across the room" bug, confirmed against
-            // wiki.resonite.com/Component:ConeEmitter (its Japanese-language wiki text reads
-            // "Height = 放出元のconeの高さ", i.e. "Height = the height of the emission-source
-            // cone" — Height is literally the emission volume's height, not a Unity-length
-            // passthrough).
+            // Unity has 4 Cone variants. Only the two "Volume" variants spawn particles
+            // distributed along the cone's length; plain Cone/ConeShell emit from the flat base
+            // disc only, where `length` just shapes velocity spread, not emission volume height.
+            // Resonite's ConeEmitter.Height is the emission volume's height (per
+            // wiki.resonite.com/Component:ConeEmitter), not a Unity-length passthrough - setting
+            // Height = shape.length unconditionally previously turned plain-Cone assets (base
+            // emission only) into particles scattered across a `length`-meter-tall volume.
             case ParticleSystemShapeType.Cone:
             case ParticleSystemShapeType.ConeShell:
             case ParticleSystemShapeType.ConeVolume:
@@ -365,8 +349,7 @@ public class ParticleSystemConverter : ResoniteComponentConverter<UnityEngine.Pa
                     case ParticleSystemMeshShapeType.Triangle: skin.EmitFrom = PhotonDust.MeshEmissionSource.Faces; break;
                 }
 
-                // TODO!!!
-                //skin.Skin = shape.skinnedMeshRenderer;
+                // TODO: skin.Skin binding to shape.skinnedMeshRenderer not yet implemented.
                 break;
         }
 
