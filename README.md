@@ -224,10 +224,10 @@ comments for why full grading was tried and reverted).
      reference equality to GUID + local file ID (fixes multiple sub-assets inside the same
      .fbx getting mixed up)
    - 60-second timeout — `AssetConverter.cs`, throws if an asset conversion hangs
-5. **Panel cleanup** (new file, no need to touch upstream) — `ResoniteLinkWindow.cs` (main
-   panel) trimmed to just connect / Send Current Scene / Realtime Mode plus 3 toggles;
-   partial-send/cleanup/reset tools moved to a new `ResoniteSDKDebugWindow.cs`
-   (`Resonite SDK > Open Debug Tools`).
+5. **Panel cleanup** (no upstream file changes needed) — `ResoniteLinkWindow.cs` (main panel)
+   trimmed to just connect / Send Current Scene / Realtime Mode plus the one vanilla Convert
+   Skybox toggle; every overlay-added tool (partial sends, retry, logging, tuning sliders)
+   lives in the **Lightmap Bake & Send** panel instead (`LightmapPipelineWindow.cs`).
 6. **Automatic water-material detection** (new) — `WaterPanningConverter.cs` detects any
    custom shader whose name contains "water" and converts it to the community-standard
    water pattern (PBS_Metallic + Panner2D UV scroll).
@@ -254,7 +254,7 @@ comments for why full grading was tried and reverted).
     section (Force Refresh Generated Lightmaps / Send Tonemap Compensation toggles, moved
     here from the main SDK panel since they're overlay additions, not vanilla
     Resonite.UnitySDK), a "Send-Time Light Tuning" section (`LightTuning.IntensityCeiling`
-    slider), and a "Baked Lightmap Exposure" section
+    slider with a "Reset to Defaults" button), and a "Baked Lightmap Exposure" section
     (`LightmapDecoder.RangeScale`/`ColorSaturationCompensation` sliders —
     a bake's own brightness varies per scene, so these are meant to be re-checked whenever
     you switch rooms) — all three of the latter sections are shown regardless of baker since
@@ -513,10 +513,10 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
    - アセット同一性判定のバグ修正 — `AssetConversionManager.cs`（判定キーをGUID+
      ローカルファイルIDベースに変更、同一.fbx内の複数サブアセットの取り違えを修正）
    - 60秒タイムアウト — `AssetConverter.cs`（アセット変換がハングした場合に検知可能にする）
-5. **パネル整理**（新規、外だし不要＝独自ファイル） — `ResoniteLinkWindow.cs`（メインパネル）
-   は接続・Send Current Scene・Realtime Mode・3トグルのみに整理。部分送信テスト・
-   クリーンアップ・状態リセット等は新規`ResoniteSDKDebugWindow.cs`
-   （`Resonite SDK > Open Debug Tools`）へ分離。
+5. **パネル整理**（本家ファイルへの変更不要） — `ResoniteLinkWindow.cs`（メインパネル）は
+   接続・Send Current Scene・Realtime Mode・本家由来のConvert Skyboxトグル1個のみに整理。
+   オーバーレイ独自の機能（部分送信・再試行・ログ・調整スライダー類）は全て**Lightmap
+   Bake & Send**パネル（`LightmapPipelineWindow.cs`）側に集約。
 6. **水面マテリアル自動検出**（新規） — `WaterPanningConverter.cs`がシェーダー名に"water"を
    含む任意のカスタムシェーダーを検出し、実在するResoniteワールドの水面表現パターン
    （PBS_Metallic + Panner2D UVスクロール）へ変換。
@@ -540,7 +540,7 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
     「法線を焼き込む」オプション、「送信時オプション」セクション（Force Refresh Generated
     Lightmaps / Send Tonemap Compensationトグル。本家Resonite.UnitySDK非搭載のオーバーレイ
     独自機能のためメインSDKパネルからこちらへ移設）、「送信時ライト調整」セクション
-    （`LightTuning.IntensityCeiling`のスライダー）、「ベイクライトマップ
+    （`LightTuning.IntensityCeiling`のスライダー＋「既定値に戻す」ボタン）、「ベイクライトマップ
     露出」セクション（`LightmapDecoder.RangeScale`/`ColorSaturationCompensation`のスライダー。
     焼きデータの明るさはシーンごとに違うため部屋を変えたら要再確認）も備える。後者3つは
     ベイク時ではなく変換/送信時（露出は正確にはデコード時）に効く値のためBaker非依存で
