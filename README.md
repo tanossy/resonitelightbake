@@ -116,8 +116,13 @@ The following are automatically excluded from the set of scene roots sent
   Unity's is never needed)
 - Any root in a Missing Prefab state (e.g. the leftover `VRCWorld` root when importing a
   VRChat world — there's no source asset left to convert)
-
-Nested child objects are not currently handled (only root-level objects are filtered).
+- Any root whose hierarchy (root or any descendant, active or inactive) contains a
+  MonoBehaviour with an unresolvable script — Unity surfaces this as a literal `null`
+  entry in `GetComponentsInChildren<Component>(true)`, the same idiom Unity's own
+  "select prefabs with missing scripts" tooling uses. Catches VRChat-derived leftovers
+  that aren't broken prefab instances themselves (e.g. a non-broken `Easy Mirror` prefab
+  whose nested "UI" child carries an unresolvable VRChat SDK script) — this check walks
+  the whole hierarchy rather than just the root, since not every case sits at the top.
 
 #### Baked lightmap → Resonite import
 
@@ -403,8 +408,12 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
 - `UnityEngine.Camera` を持つルート（Resoniteは独自のカメラ系を持つため不要）
 - Missing Prefab状態のルート（VRChatワールドをインポートした際の `VRCWorld` 等、
   ソースアセットが存在せず変換しようがないもの）
-
-子オブジェクトとして紛れ込んでいる場合は未対応（現状はシーン直下のルート単位の判定のみ）。
+- 階層内（ルート自身または子孫、非アクティブ含む）のどこかに、スクリプト解決不能な
+  MonoBehaviourを含むルート。Unityはこれを`GetComponentsInChildren<Component>(true)`上の
+  文字通りの`null`エントリとして表す（Unity公式の「missing scriptを持つprefabを選択」
+  ツールと同じ判定方法）。壊れたprefabインスタンス自体ではないVRChat由来の残骸
+  （例: `Easy Mirror`——prefab自体は正常だが、その子`UI`が解決不能なVRChat SDKスクリプトを
+  持つ）も拾える。ルートだけでなく階層全体を走査する（該当箇所がルート直下とは限らないため）。
 
 #### ライトマップベイク → Resonite取り込み
 
