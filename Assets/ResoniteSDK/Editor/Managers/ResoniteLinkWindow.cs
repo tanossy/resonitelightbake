@@ -175,11 +175,22 @@ public class ResoniteLinkWindow : EditorWindow
         GUI.enabled = true;
 
         // The "Meshes/Materials/Lightmaps Only" sends, "Retry Missing Asset URLs", and the whole
-        // DEBUGGING section (Cleanup tools, Reset conversion state, Log Messages JSON) live in
-        // ResoniteSDKDebugWindow.cs (menu: Resonite SDK/Open Debug Tools) rather than in this
-        // official-looking panel. The methods they call are public so they can be referenced
-        // directly from there. Only the always-used controls (Connect, Send Current Scene,
-        // Realtime Mode) remain here.
+        // DEBUGGING section (Cleanup tools, Reset conversion state, Log Messages JSON) live
+        // outside this official-looking panel rather than in it. Only the always-used controls
+        // (Connect, Send Current Scene, Realtime Mode) remain here.
+        //
+        // They first landed in a standalone ResoniteSDKDebugWindow.cs (menu: Resonite SDK/Open
+        // Debug Tools), but that window turned out redundant with LightmapPipelineWindow.cs
+        // (menu: Resonite SDK/Lightmap Pipeline) and has since been deleted - its buttons now
+        // live in that window's "Debug / Cleanup" section instead, called via
+        // LightmapTestHarness.cs's RetryMissingAssetURLs()/ResetConversionState()/
+        // LogMessageJSON, same as its other sections. This window's own public passthrough
+        // methods below (SendMeshesOnly/SendMaterialsOnly/SendLightmapsOnly/
+        // RetryMissingAssetURLs/ResetConversionState) are unaffected by that move - they're
+        // still invoked via reflection through LightmapTestHarness.InvokeConnectedSdkSend(),
+        // same as before. CleanupConverters() is not called this way at all - it's only ever
+        // invoked internally, from ResetConversionState() itself (see that method's own
+        // comment below); it never had (and still doesn't have) a standalone button.
     }
 
     // Force an update, which should refresh the UI

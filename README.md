@@ -88,13 +88,14 @@ don't assume it's still current just because it says so here — check for yours
    Root (an existing one is deleted and rebuilt, so re-sending never produces duplicates),
    and everything is placed under it
 5. `AssetConverter.cs` enforces a 60-second timeout on asset conversion. If you hit a
-   timeout or WebSocket disconnect, use `Reset conversion state` in the Debug Tools window
-   and resend
+   timeout or WebSocket disconnect, use `Reset Conversion State` in the Lightmap Pipeline
+   panel's "Debug / Cleanup" section and resend
 
 #### Debugging / partial sends
 
-Open `Resonite SDK > Open Debug Tools` (requires `Resonite SDK Manager` to already be
-connected):
+Open `Resonite SDK > Lightmap Pipeline`, scroll to the "Debug / Cleanup" section (shown
+regardless of baker; requires `Resonite SDK Manager` to already be connected for most of
+these, except where noted):
 
 - **Send Meshes Only / Send Materials Only / Send Lightmaps Only** — resend just one
   category instead of redoing a full scene send (internally scoped via
@@ -102,14 +103,20 @@ connected):
 - **Retry Missing Asset URLs** — use when only the asset upload step failed while
   everything else succeeded
 - **Log Messages JSON** — log sent messages as JSON (debug only, default OFF)
-- **Cleanup converters in the scene / Cleanup Resonite Components in the scene** — bulk-
-  remove conversion helper components from the scene
-- **Reset conversion state** — rebuilds `SceneConverter` and also runs the two cleanups
-  above. The go-to recovery step when the connection gets into a bad state
+- **Reset Conversion State** — rebuilds `SceneConverter` and its converter/asset-root
+  state. The go-to recovery step when the connection gets into a bad state; meant to be
+  pressed before most re-sends
 - **Clear Generated Lightmap Variants** — deletes the whole
   `Assets/ResoniteSDK/Generated/LightmapVariants` folder (variant materials and decoded
   lightmap PNGs alike). Fully reproducible by re-running scene conversion, so always safe
-  to run; doesn't need a ResoniteLink connection
+  to run; doesn't need a ResoniteLink connection, works even mid-bake
+
+These used to live in a separate `ResoniteSDKDebugWindow.cs` (`Resonite SDK > Open Debug
+Tools`), which was removed for being redundant with this panel. Two buttons from that
+window weren't carried over: "Cleanup converters in the scene" (`Reset Conversion State`
+already calls the same cleanup internally) and "Cleanup Resonite Components in the
+scene" (found to be entirely redundant with the cleanup chain the other buttons already
+trigger, and a source of "Destroying object multiple times" warnings on its own).
 
 #### Objects excluded automatically
 
@@ -395,24 +402,31 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
 4. `Send Current Scene` を押す。World Root直下に単一の `Unity Import` スロットが作られ
    （既存があれば削除してから作り直す＝再送信しても重複しない）、その下に全内容が入る
 5. 送信中は `AssetConverter.cs` 側に60秒のタイムアウトが設定されている。
-   タイムアウトやWebSocket切断が起きたら「デバッグツール」の `Reset conversion state` →
-   再送信で復帰できる
+   タイムアウトやWebSocket切断が起きたらLightmap Pipelineパネルの「デバッグ / クリーンアップ」
+   セクションの `Reset Conversion State` → 再送信で復帰できる
 
 #### デバッグ・部分送信
 
-`Resonite SDK > Open Debug Tools` を開く（`Resonite SDK Manager` が先に接続されている必要あり）:
+`Resonite SDK > Lightmap Pipeline` を開き、「デバッグ / クリーンアップ」セクションまで
+スクロール（どちらのBakerでも常時表示。一部の項目を除き`Resonite SDK Manager`が先に
+接続されている必要あり）:
 
 - **Send Meshes Only / Send Materials Only / Send Lightmaps Only** — フルシーン送信をやり直さず
   一部だけ再送信したい時に使用（`ConversionPassState.ActivePass` で内部的に何を送るか絞り込む）
 - **Retry Missing Asset URLs** — アセットアップロードだけ失敗して他は成功している場合に使用
 - **Log Messages JSON** — 送信メッセージをJSONでログ出力（デバッグ用、デフォルトOFF）
-- **Cleanup converters in the scene / Cleanup Resonite Components in the scene** —
-  変換用ヘルパーコンポーネントをシーンから一括削除
-- **Reset conversion state** — `SceneConverter` を作り直し、上記2つのクリーンアップも実行。
-  接続がおかしくなった時の基本の復旧手段
+- **Reset Conversion State** — `SceneConverter`とコンバータ/アセットルートの状態を作り直す。
+  接続がおかしくなった時の基本の復旧手段。再送信の前は基本的にこれを押す運用を想定
 - **Clear Generated Lightmap Variants** — `Assets/ResoniteSDK/Generated/LightmapVariants`
   フォルダ（バリアントマテリアル・デコード済みライトマップPNG含む）を丸ごと削除。
-  シーン再変換で完全に再生成されるため常に安全に実行可能。ResoniteLink接続不要
+  シーン再変換で完全に再生成されるため常に安全に実行可能。ResoniteLink接続不要・ベイク中でも実行可
+
+これらは以前、独立した`ResoniteSDKDebugWindow.cs`（`Resonite SDK > Open Debug Tools`）に
+あったが、このパネルと冗長なため廃止された。同ウィンドウの2ボタンは移設しなかった:
+「Cleanup converters in the scene」（`Reset Conversion State`が内部で同じクリーンアップを
+既に実行するため）と「Cleanup Resonite Components in the scene」（他ボタンが既に走らせる
+クリーンアップ連鎖と完全に重複しており、それ自体が「Destroying object multiple times」
+警告の原因になっていたと判明したため）。
 
 #### 除外されるオブジェクト
 
@@ -635,8 +649,7 @@ Assets/ResoniteSDK/
 │   ├── SkyboxConverter.cs                    [official, modified] fake-null fix, SH2 default-off
 │   ├── AssetConversionManager.cs             [official, modified] asset identity (GUID+localId)
 │   └── Managers/
-│       ├── ResoniteLinkWindow.cs             [official, modified] main panel (connect/send/3 toggles)
-│       └── ResoniteSDKDebugWindow.cs         ★new debug panel (partial send / cleanup)
+│       └── ResoniteLinkWindow.cs             [official, modified] main panel (connect/send/1 toggle)
 │
 ├── AssetConverters/
 │   ├── AssetConverter.cs                     [official, modified] 60-second timeout
