@@ -66,7 +66,14 @@ public class ResoniteSDKDebugWindow : EditorWindow
         if (GUILayout.Button("Reset conversion state"))
             window.ResetConversionState();
 
+        // Moved here from its own standalone top-level menu item
+        // (Resonite SDK/Clear Generated Lightmap Variants). GUI.enabled is reset to true first -
+        // unlike the buttons above, this only touches local Unity-side generated assets, so it
+        // doesn't need a ResoniteLink connection to run.
         GUI.enabled = true;
+
+        if (GUILayout.Button("Clear Generated Lightmap Variants"))
+            LightmapMaterialCache.ClearGeneratedLightmapVariants();
     }
 
     // For the same reason as LightmapTestHarness.PickResoniteLinkWindow() (multiple instances can

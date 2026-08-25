@@ -106,6 +106,10 @@ connected):
   remove conversion helper components from the scene
 - **Reset conversion state** — rebuilds `SceneConverter` and also runs the two cleanups
   above. The go-to recovery step when the connection gets into a bad state
+- **Clear Generated Lightmap Variants** — deletes the whole
+  `Assets/ResoniteSDK/Generated/LightmapVariants` folder (variant materials and decoded
+  lightmap PNGs alike). Fully reproducible by re-running scene conversion, so always safe
+  to run; doesn't need a ResoniteLink connection
 
 #### Objects excluded automatically
 
@@ -400,6 +404,9 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
   変換用ヘルパーコンポーネントをシーンから一括削除
 - **Reset conversion state** — `SceneConverter` を作り直し、上記2つのクリーンアップも実行。
   接続がおかしくなった時の基本の復旧手段
+- **Clear Generated Lightmap Variants** — `Assets/ResoniteSDK/Generated/LightmapVariants`
+  フォルダ（バリアントマテリアル・デコード済みライトマップPNG含む）を丸ごと削除。
+  シーン再変換で完全に再生成されるため常に安全に実行可能。ResoniteLink接続不要
 
 #### 除外されるオブジェクト
 

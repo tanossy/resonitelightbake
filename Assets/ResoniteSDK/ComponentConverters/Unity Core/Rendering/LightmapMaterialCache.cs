@@ -142,7 +142,9 @@ public static class LightmapMaterialCache
     /// fully reproducible by re-running scene conversion, so this is always safe to run. See the
     /// class-level comment for why orphaned variant assets can accumulate here over time.
     /// </summary>
-    [MenuItem("Resonite SDK/Clear Generated Lightmap Variants")]
+    // Moved out of its own standalone top-level menu item and into ResoniteSDKDebugWindow.cs
+    // (menu: Resonite SDK/Open Debug Tools), alongside the other cleanup/reset buttons. This
+    // method itself is unchanged - only the [MenuItem] entry point moved.
     public static void ClearGeneratedLightmapVariants()
     {
         _materialByPath.Clear();
