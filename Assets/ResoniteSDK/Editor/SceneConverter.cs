@@ -500,7 +500,14 @@ public class SceneConverter : IConversionContext
             {
                 // Check if the target still exists
                 if (converter.Target == null)
+                {
+                    // This destroys the converter component alone (its GameObject survives), so
+                    // its Resonite-side wrapper component(s) won't be cleaned up by Unity's own
+                    // destroy cascade - Cleanup() needs to do that explicitly (see
+                    // ResoniteComponentConverter.cs's ExplicitCleanupRequested field comment).
+                    converter.ExplicitCleanupRequested = true;
                     UnityEngine.Object.DestroyImmediate(converter);
+                }
                 else
                     converterMap.Add(converter.Target, converter);
             }

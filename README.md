@@ -282,7 +282,17 @@ comments for why full grading was tried and reverted).
     `MeshRendererConverter.cs`/`StandardBaseConverter.cs`; a mixed-lightmap-eligibility
     warning in `MeshRendererConverter.cs`; a Unity "fake null" crash fix and SH2 default-off
     in `SkyboxConverter.cs`; assorted fallback handling in `Texture2DConverter.cs`/
-    `StandardConverter.cs`/`UnlitConverter.cs`.
+    `StandardConverter.cs`/`UnlitConverter.cs`; a console-flooding "Destroying object multiple
+    times" warning fixed at its root in `ResoniteComponentConverter.cs` (new
+    `ExplicitCleanupRequested` flag) plus every converter with its own `Cleanup()` override
+    (`MeshColliderConverter.cs`/`AudioEffectConverter.cs`/`AudioSourceConverter.cs`/
+    `AnimatorConverter.cs`/`ParticleSystemConverter.cs`) - the wrapper component a converter
+    creates lives on the same GameObject as the original Unity component, so explicitly
+    destroying it in `Cleanup()` is only needed when a caller destroys the converter alone; if
+    the whole GameObject is destroyed instead (deleting a Light in the Hierarchy, or Bakery
+    tearing down its temporary bake scene mid-bake - confirmed live, every Bakery bake was
+    flooding the console with dozens of these), the wrapper is already part of that same
+    destroy cascade and re-destroying it is what triggered the warning.
 11. **Lightmap Bake & Send panel** (new, `Assets/Editor/`) — `LightmapPipelineWindow.cs`
     (`Resonite SDK > Lightmap Bake & Send`) turns "pick a quality preset → bake → send" into
     one button (`Bake & Send`), for either Bakery (if installed) or Unity's built-in
@@ -605,7 +615,16 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
 10. **その他バグ修正** — `MeshColliderConverter.cs`/`MeshRendererConverter.cs`/
     `StandardBaseConverter.cs`等の部分送信ガード、`MeshRendererConverter.cs`の混在時警告、
     `SkyboxConverter.cs`のfake-null対策・SH2デフォルト無効化、`Texture2DConverter.cs`/
-    `StandardConverter.cs`/`UnlitConverter.cs`のフォールバック処理。
+    `StandardConverter.cs`/`UnlitConverter.cs`のフォールバック処理。コンソールを埋め尽くす
+    「Destroying object multiple times」警告を根本から修正 —
+    `ResoniteComponentConverter.cs`に`ExplicitCleanupRequested`フラグを新設し、独自の
+    `Cleanup()`を持つ全コンバータ（`MeshColliderConverter.cs`/`AudioEffectConverter.cs`/
+    `AudioSourceConverter.cs`/`AnimatorConverter.cs`/`ParticleSystemConverter.cs`）へ適用。
+    コンバータが生成するラッパーコンポーネントは元のUnityコンポーネントと同じGameObject上に
+    あるため、`Cleanup()`での明示的破棄はコンバータ単体を破棄する場合にのみ必要——
+    GameObject自体が丸ごと破棄される場合（HierarchyでLightを削除、あるいはBakeryがベイク中に
+    一時シーンを畳む時等——実機確認済み、Bakeryでベイクする度に大量の警告が出ていた）は、
+    ラッパーは既に同じ破棄連鎖の中で消えており、そこへの再破棄が警告の原因だった。
 11. **Lightmap Bake & Sendパネル**（新規、`Assets/Editor/`） — `LightmapPipelineWindow.cs`
     （メニュー: `Resonite SDK > Lightmap Bake & Send`）が「品質プリセット選択→ベイク→送信」を
     `Bake & Send`ボタン1つに集約する。対象はBakery（導入されていれば）またはUnity標準
@@ -710,25 +729,29 @@ Assets/ResoniteSDK/
 │
 ├── ConversionPassState.cs                    ★new partial-send passes (Full/MeshesOnly/MaterialsOnly/LightmapsOnly)
 │
-├── ComponentConverters/Unity Core/
-│   ├── Audio/
-│   │   └── AudioEffectConverter.cs           ★new AudioReverbFilter → AudioZitaReverb (unverified live)
-│   ├── Colliders/
-│   │   └── MeshColliderConverter.cs          [official, modified] partial-send guard
-│   └── Rendering/
-│       ├── LightConverter.cs                 [official, modified (1 line)] → calls LightTuning.cs
-│       ├── LightTuning.cs                    ★new per-scene brightness multiplier
-│       ├── LightmapDecoder.cs                ★new bake-data decode / gain / saturation adjustment
-│       ├── LightmapMaterialCache.cs          ★new per-lightmap material-variant management
-│       ├── LightmapDecode.shader             ★new decode shader
-│       ├── DirectionalLightmapBaker.cs       ★new directional-lightmap baking
-│       ├── RawPassthroughBlit.shader         ★new
-│       ├── Uv2NormalPatch.shader             ★new
-│       ├── MeshRendererConverter.cs          [official, modified] lightmap-variant swap + partial-send guard
-│       ├── SkinnedMeshRendererConverter.cs   [official, modified (3 lines)]
-│       ├── ReflectionProbeConverter.cs       [official, modified] Tonemap Compensation applied
-│       ├── ParticleSystemConverter.cs        [official, modified] assorted bug fixes
-│       └── PostProcessingConverter.cs        ★new PPv2 GlobalVolume → PostProcessingSettings
+├── ComponentConverters/
+│   ├── ResoniteComponentConverter.cs         [official, modified] ExplicitCleanupRequested guard (see "Other bug fixes")
+│   └── Unity Core/
+│       ├── Audio/
+│       │   ├── AudioEffectConverter.cs       ★new AudioReverbFilter → AudioZitaReverb (unverified live)
+│       │   └── AudioSourceConverter.cs       [official, modified] Cleanup() guard (see "Other bug fixes")
+│       ├── Colliders/
+│       │   └── MeshColliderConverter.cs      [official, modified] partial-send guard + Cleanup() guard
+│       └── Rendering/
+│           ├── LightConverter.cs             [official, modified (1 line)] → calls LightTuning.cs
+│           ├── LightTuning.cs                ★new per-scene brightness multiplier
+│           ├── LightmapDecoder.cs            ★new bake-data decode / gain / saturation adjustment
+│           ├── LightmapMaterialCache.cs      ★new per-lightmap material-variant management
+│           ├── LightmapDecode.shader         ★new decode shader
+│           ├── DirectionalLightmapBaker.cs   ★new directional-lightmap baking
+│           ├── RawPassthroughBlit.shader     ★new
+│           ├── Uv2NormalPatch.shader         ★new
+│           ├── AnimatorConverter.cs          [official, modified] Cleanup() guard (see "Other bug fixes")
+│           ├── MeshRendererConverter.cs      [official, modified] lightmap-variant swap + partial-send guard
+│           ├── SkinnedMeshRendererConverter.cs [official, modified (3 lines)]
+│           ├── ReflectionProbeConverter.cs   [official, modified] Tonemap Compensation applied
+│           ├── ParticleSystemConverter.cs    [official, modified] assorted bug fixes + Cleanup() guard
+│           └── PostProcessingConverter.cs    ★new PPv2 GlobalVolume → PostProcessingSettings
 │
 ├── MaterialConverters/
 │   ├── ColorGradingApproximation.cs          ★new Tonemap Compensation's material-color entry point
