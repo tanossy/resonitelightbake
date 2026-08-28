@@ -203,7 +203,7 @@ a code edit:
 
 | File | Field | Current value | Meaning |
 |---|---|---|---|
-| `LightTuning.cs` | `IntensityCeiling` | 0.9 | Target intensity for the scene's single brightest light; every light is scaled by the ratio needed to put the brightest one exactly here (self-normalizing per scene, not a fixed multiplier) |
+| `LightTuning.cs` | `IntensityCeiling` | 1.3 | Target intensity for the scene's single brightest light; every light is scaled by the ratio needed to put the brightest one exactly here (self-normalizing per scene, not a fixed multiplier) |
 | `LightmapDecoder.cs` | `RangeScale` | 1.1 | Pre-decode gain applied to baked lightmap data |
 | `LightmapDecoder.cs` | `ColorSaturationCompensation` | 0.6 | Saturation reduction applied to the baked lightmap data itself (0–1) |
 | `BakedLightmapStandardConverter.cs` | `SmoothnessCompensation` | 0.05 | Multiplier on scalar Smoothness (only affects materials with no MetallicMap) |
@@ -544,7 +544,7 @@ Unity上での見た目とResonite実機での見た目にギャップがあり�
 
 | ファイル | フィールド | 現在値 | 意味 |
 |---|---|---|---|
-| `LightTuning.cs` | `IntensityCeiling` | 0.9 | シーン内で最も明るいライトがこの値になるよう、全ライトへ同じ比率で倍率を逆算（固定倍率ではなくシーンごとに自動正規化） |
+| `LightTuning.cs` | `IntensityCeiling` | 1.3 | シーン内で最も明るいライトがこの値になるよう、全ライトへ同じ比率で倍率を逆算（固定倍率ではなくシーンごとに自動正規化） |
 | `LightmapDecoder.cs` | `RangeScale` | 1.1 | ベイクデータのデコード前ゲイン |
 | `LightmapDecoder.cs` | `ColorSaturationCompensation` | 0.6 | ベイクデータ自体の彩度低減（0〜1）|
 | `BakedLightmapStandardConverter.cs` | `SmoothnessCompensation` | 0.05 | スカラーSmoothnessへの係数（MetallicMap無しの材質のみ有効）|

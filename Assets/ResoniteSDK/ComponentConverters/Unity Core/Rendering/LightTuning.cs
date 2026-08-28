@@ -13,7 +13,11 @@ public static class LightTuning
     // Known limitation: this only bounds the single brightest light, not cumulative brightness -
     // many moderate-intensity fill lights, each individually under the ceiling, can still sum to
     // an overexposed result.
-    public static float IntensityCeiling = 0.9f;
+    //
+    // 0.9 was carried over from an earlier fixed-multiplier tuning and turned out too dark
+    // overall under this formula; raised to 1.3, kept well under 1.8 (a value tried earlier
+    // that caused blown-out specular reflections on TVs/metal/glass).
+    public static float IntensityCeiling = 1.3f;
 
     // A WhiteBalanceShift field and ApplyColor() method used to live here, blending each light's
     // color toward white at send time. It went through several rounds of tuning but was removed

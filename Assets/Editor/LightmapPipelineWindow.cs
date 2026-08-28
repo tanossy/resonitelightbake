@@ -257,7 +257,7 @@ public class LightmapPipelineWindow : EditorWindow
     // Kept as this window's own fields (synced into LightTuning's statics every OnGUI, same
     // pattern DrawLightingSection() already uses for its own knobs) so the values are
     // editable from this panel instead of requiring a code edit.
-    float _lightIntensityCeiling = 0.9f;
+    float _lightIntensityCeiling = 1.3f;
 
     const string SendTimeTuningHeaderJA = "送信時ライト調整";
     const string SendTimeTuningHeaderEN = "Send-Time Light Tuning";
@@ -704,7 +704,7 @@ public class LightmapPipelineWindow : EditorWindow
 
     // Send-Time Light Tuning section: drawn for both bakers (applies at conversion/send time,
     // not bake time). Values sync straight into LightTuning's static field every OnGUI call.
-    const float DefaultLightIntensityCeiling = 0.9f;
+    const float DefaultLightIntensityCeiling = 1.3f;
 
     void DrawSendTimeLightTuningSection(bool baking)
     {
