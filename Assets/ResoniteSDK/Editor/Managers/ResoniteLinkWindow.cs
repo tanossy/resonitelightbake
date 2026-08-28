@@ -174,7 +174,7 @@ public class ResoniteLinkWindow : EditorWindow
         GUI.enabled = true;
 
         // "Meshes/Materials/Lightmaps Only", "Retry Missing Asset URLs", and the DEBUGGING section
-        // (Cleanup tools, Log Messages JSON) live in the Lightmap Bake & Send window's
+        // (Cleanup tools, Log Messages JSON) live in the Lightmap Baker window's
         // "Debug / Cleanup" section instead of here, invoked via reflection through
         // LightmapTestHarness.InvokeConnectedSdkSend() against this window's public passthrough
         // methods below. Only the always-used controls (Connect, Send Current Scene, Realtime

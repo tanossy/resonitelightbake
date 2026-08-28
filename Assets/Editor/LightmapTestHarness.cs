@@ -21,7 +21,7 @@
 //   - BakeryTempObjectSuppression.cs : excludes "!ftraceLightmaps" (ftLightmapsStorage) from
 //     scene conversion via the SDK's own ConversionSupressionHandler mechanism.
 //   - LightmapPipelineWindow.cs      : thin GUI layer over this file's static methods
-//     (menu "Resonite SDK/Lightmap Bake & Send"). All logic lives here.
+//     (menu "Resonite SDK/Lightmap Baker"). All logic lives here.
 //
 // Referenced API surface (confirmed by reading the actual source, never assumed):
 //   - Bakery: Assets/Editor/x64/Bakery/scripts/ftRenderLightmap.cs
@@ -211,8 +211,9 @@ public static class LightmapTestHarness
         set => SessionState.SetBool(SessionKeyLastUsedCurrentScene, value);
     }
 
-    // Set only at the moment a 'pipeline' run (or the window's "Bake & Send" button) starts
-    // a bake; consumed and cleared exactly once by whichever bake-finished handler
+    // Set only at the moment a 'pipeline' run starts a bake (the window itself no longer has
+    // a "Bake & Send" button - only the file-command-driven "pipeline" run reaches this path
+    // now); consumed and cleared exactly once by whichever bake-finished handler
     // (OnBakeFinished for Bakery, OnUnityBakeFinished for Unity standard) fires next. A bare
     // "bake" command or a manual in-editor bake never sets this, so it never triggers an
     // unwanted auto-convert.
@@ -896,8 +897,8 @@ public static class LightmapTestHarness
     {
         // Second line of defense (the first is the command-file dispatch guard in
         // DispatchCommand): StartBake() is also called directly by RunPipeline() and by
-        // LightmapPipelineWindow's "Bake"/"Bake & Send" buttons, neither of which is
-        // guaranteed to have re-checked IsBakeInProgress immediately beforehand.
+        // LightmapPipelineWindow's "Bake" button, neither of which is guaranteed to have
+        // re-checked IsBakeInProgress immediately beforehand.
         if (IsBakeInProgress)
         {
             AppendResult("StartBake: bake already in progress; call ignored.");

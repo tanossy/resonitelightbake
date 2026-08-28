@@ -67,7 +67,7 @@ public static class LightmapDecoder
     // value; being a single global constant, the right value depends on how dark a given room's
     // own bake data is, so it isn't guaranteed to fit every scene (same class of issue
     // LightTuning.IntensityCeiling addresses on the real-time-light side). Also exposed as a
-    // slider in the Lightmap Bake & Send panel's "Baked Lightmap Exposure" section so it can be
+    // slider in the Lightmap Baker panel's "Baked Lightmap Exposure" section so it can be
     // re-tuned per room without a code edit.
     public static float RangeScale = 1.1f;
 

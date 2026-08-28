@@ -23,8 +23,10 @@ Fork point / フォーク元コミット: `5eea4b03` (right after PR #117 merged
    `ResoniteLightbake`のUnityPackageを入れる
 3. Launch Resonite and get ResoniteLink ready to connect /
    Resoniteを起動し、ResoniteLinkが使えるように設定する
-4. Click **Bake & Send** in the UnitySDK panel (`Resonite SDK > Lightmap Bake & Send`) /
-   UnitySDKのパネル（`Resonite SDK > Lightmap Bake & Send`）で **Bake & Send** を押す
+4. Click **Bake** in the UnitySDK panel (`Resonite SDK > Lightmap Baker`), then **Send
+   Current Scene** in `Resonite SDK > Open Resonite SDK Manager` /
+   UnitySDKのパネル（`Resonite SDK > Lightmap Baker`）で **Bake** を押し、その後
+   `Resonite SDK > Open Resonite SDK Manager`の **Send Current Scene** を押す
 
 ---
 
@@ -80,8 +82,8 @@ upstream release means re-applying its edits by hand, file by file:
    silently overwrite it back to this fork's old content — open the new upstream version and
    manually re-apply this overlay's specific edit (the diffs are small for most files; see
    "Design principle" below for which ones carry a larger diff and why).
-4. **Verify**: the project compiles, and a real `Bake & Send` round-trip still lands correctly
-   in a running Resonite session.
+4. **Verify**: the project compiles, and a real `Bake` then `Send Current Scene` round-trip
+   still lands correctly in a running Resonite session.
 5. **Update this README**: the "Fork point" commit hash at the top, and the "Status as of..."
    drift-check note above.
 
@@ -120,8 +122,8 @@ is "minimize the diff," not "avoid touching the file."
    - **Convert Skybox** — whether to also send the skybox (Material/ReflectionProbe); the
      only one of these that's actually part of vanilla Resonite.UnitySDK
    - Force Refresh Generated Lightmaps and Send Tonemap Compensation now live in the
-     **Lightmap Bake & Send** panel's "Send-Time Options" section instead (`Resonite SDK >
-     Lightmap Bake & Send`; applies to either baker — see "Tonemap Compensation" below)
+     **Lightmap Baker** panel's "Send-Time Options" section instead (`Resonite SDK >
+     Lightmap Baker`; applies to either baker — see "Tonemap Compensation" below)
 4. Click `Send Current Scene`. A single `Unity Import` slot is created directly under World
    Root (an existing one is deleted and rebuilt, so re-sending never produces duplicates),
    and everything is placed under it
@@ -131,7 +133,7 @@ is "minimize the diff," not "avoid touching the file."
 
 #### Debugging / partial sends
 
-Open `Resonite SDK > Lightmap Bake & Send`, scroll to the "Debug / Cleanup" section (shown
+Open `Resonite SDK > Lightmap Baker`, scroll to the "Debug / Cleanup" section (shown
 regardless of baker; requires `Resonite SDK Manager` to already be connected for most of
 these, except where noted):
 
@@ -193,9 +195,9 @@ Lightmapper baked lightmaps in Resonite. Operational notes:
 
 There's a real gap between how a scene looks in the Unity Editor and how it looks on a
 live Resonite client. The following static values were tuned iteratively against a running
-client. `IntensityCeiling` has a slider in the **Lightmap Bake & Send** panel's "Send-Time
+client. `IntensityCeiling` has a slider in the **Lightmap Baker** panel's "Send-Time
 Light Tuning" section, and `RangeScale`/`ColorSaturationCompensation` have sliders in that
-same panel's "Baked Lightmap Exposure" section (`Resonite SDK > Lightmap Bake & Send`, both
+same panel's "Baked Lightmap Exposure" section (`Resonite SDK > Lightmap Baker`, both
 sections apply to either baker — see that panel's own section below); the rest still require
 a code edit:
 
@@ -220,7 +222,7 @@ Reproduces Unity PPv2's Neutral Tonemapper-style color compression and applies i
 material colors — AlbedoColor/EmissiveColor, saturation only — and to Reflection Probe
 intensity). Resonite's renderer (Renderite) does no camera-side post-process tonemapping,
 so the same HDR values look glarier/blown-out in Resonite than they did tonemapped in
-Unity. Toggle it from the **Lightmap Bake & Send** panel's "Send Tonemap Compensation" checkbox
+Unity. Toggle it from the **Lightmap Baker** panel's "Send Tonemap Compensation" checkbox
 in the "Send-Time Options" section (default ON).
 
 **Currently only the Reflection Probe half has a visible effect.** The material-color half
@@ -265,7 +267,7 @@ comments for why full grading was tried and reverted).
 5. **Panel cleanup** (no upstream file changes needed) — `ResoniteLinkWindow.cs` (main panel)
    trimmed to just connect / Send Current Scene / Realtime Mode plus the one vanilla Convert
    Skybox toggle; every overlay-added tool (partial sends, retry, logging, tuning sliders)
-   lives in the **Lightmap Bake & Send** panel instead (`LightmapPipelineWindow.cs`).
+   lives in the **Lightmap Baker** panel instead (`LightmapPipelineWindow.cs`).
 6. **Automatic water-material detection** (new) — `WaterPanningConverter.cs` detects any
    custom shader whose name contains "water" and converts it to the community-standard
    water pattern (PBS_Metallic + Panner2D UV scroll).
@@ -293,11 +295,13 @@ comments for why full grading was tried and reverted).
     tearing down its temporary bake scene mid-bake - confirmed live, every Bakery bake was
     flooding the console with dozens of these), the wrapper is already part of that same
     destroy cascade and re-destroying it is what triggered the warning.
-11. **Lightmap Bake & Send panel** (new, `Assets/Editor/`) — `LightmapPipelineWindow.cs`
-    (`Resonite SDK > Lightmap Bake & Send`) turns "pick a quality preset → bake → send" into
-    one button (`Bake & Send`), for either Bakery (if installed) or Unity's built-in
-    Progressive Lightmapper. Also exposes standalone `Bake`/`Convert Lights`/partial-send
-    buttons, a lighting-tuning section (ambient/shadow/sun knobs) for the Unity Standard
+11. **Lightmap Baker panel** (new, `Assets/Editor/`) — `LightmapPipelineWindow.cs`
+    (`Resonite SDK > Lightmap Baker`) turns "pick a quality preset → bake" into one `Bake`
+    button, for either Bakery (if installed) or Unity's built-in Progressive Lightmapper.
+    Sending isn't duplicated here - use `Send Current Scene` on the main SDK panel after
+    baking (a former `Bake & Send` combo button was removed as redundant with that). Also
+    exposes standalone `Convert Lights`/partial-send buttons, a lighting-tuning section
+    (ambient/shadow/sun knobs) for the Unity Standard
     path, an experimental "bake normal detail into lightmap" option, a "Send-Time Options"
     section (Force Refresh Generated Lightmaps / Send Tonemap Compensation toggles, moved
     here from the main SDK panel since they're overlay additions, not vanilla
@@ -431,8 +435,8 @@ ResoniteSDKフォルダを削除してください」とあります。このオ
    再インポートでフォーク時点の内容へ黙って巻き戻させてはいけない——新しい本家側の内容を
    ベースに、このオーバーレイ独自の変更点を手動で当て直す（ほとんどのファイルは差分が
    小さい。どのファイルがどのくらいの差分を抱えているかは下記「設計方針」参照）。
-4. **検証する**: コンパイルが通ること、実際に稼働中のResoniteセッションへ`Bake & Send`が
-   正しく届くこと。
+4. **検証する**: コンパイルが通ること、実際に稼働中のResoniteセッションへ`Bake`してから
+   `Send Current Scene`する一連の流れが正しく届くこと。
 5. **このREADMEを更新する**: 冒頭の「フォーク元コミット」ハッシュと、上記「時点の状況」の
    検証済み日付。
 
@@ -469,8 +473,8 @@ SDKの構造上そもそも成立しない。`Assets/ResoniteSDK/Editor/Componen
 3. 必要に応じてトグルを確認:
    - **Convert Skybox** — スカイボックス（Material/ReflectionProbe）も一緒に送るか
      （このパネルの項目のうち、これだけが本家Resonite.UnitySDK由来のvanilla機能）
-   - Force Refresh Generated LightmapsとSend Tonemap Compensationは**Lightmap Bake & Send**
-     パネルの「送信時オプション」セクションに移設済み（`Resonite SDK > Lightmap Bake & Send`。
+   - Force Refresh Generated LightmapsとSend Tonemap Compensationは**Lightmap Baker**
+     パネルの「送信時オプション」セクションに移設済み（`Resonite SDK > Lightmap Baker`。
      どちらのBakerでも使える。下記「Tonemap Compensation」参照）
 4. `Send Current Scene` を押す。World Root直下に単一の `Unity Import` スロットが作られ
    （既存があれば削除してから作り直す＝再送信しても重複しない）、その下に全内容が入る
@@ -480,7 +484,7 @@ SDKの構造上そもそも成立しない。`Assets/ResoniteSDK/Editor/Componen
 
 #### デバッグ・部分送信
 
-`Resonite SDK > Lightmap Bake & Send` を開き、「デバッグ / クリーンアップ」セクションまで
+`Resonite SDK > Lightmap Baker` を開き、「デバッグ / クリーンアップ」セクションまで
 スクロール（どちらのBakerでも常時表示。一部の項目を除き`Resonite SDK Manager`が先に
 接続されている必要あり）:
 
@@ -533,9 +537,9 @@ Resonite側でも近い見た目に近似するパイプライン。運用の要
 #### 送信時の明るさ・色調整（実機チューニング値）
 
 Unity上での見た目とResonite実機での見た目にギャップがあり、以下のstatic値を実機検証しながら
-調整している。`IntensityCeiling` は **Lightmap Bake & Send** パネルの「送信時ライト調整」
+調整している。`IntensityCeiling` は **Lightmap Baker** パネルの「送信時ライト調整」
 セクションに、`RangeScale`/`ColorSaturationCompensation` は同パネルの「ベイクライトマップ露出」
-セクションにスライダーがある（`Resonite SDK > Lightmap Bake & Send`。いずれもどちらのBakerでも
+セクションにスライダーがある（`Resonite SDK > Lightmap Baker`。いずれもどちらのBakerでも
 使える。下記のパネル説明も参照）。残りは値を変えたい場合コード内の該当フィールドを直接編集する:
 
 | ファイル | フィールド | 現在値 | 意味 |
@@ -557,7 +561,7 @@ Unity上での見た目とResonite実機での見た目にギャップがあり�
 UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリアル色
 （AlbedoColor/EmissiveColor、彩度のみ）とReflection Probe強度に反映する。Resonite
 (Renderite)は主カメラのポスト処理トーンマッピングを持たないため、同じHDR値でもUnity側より
-反射・発光がぎらつく問題への対策。**Lightmap Bake & Send**パネルの「送信時オプション」内
+反射・発光がぎらつく問題への対策。**Lightmap Baker**パネルの「送信時オプション」内
 「Send Tonemap Compensation」トグルでON/OFF可能（デフォルトON）。
 
 **現状、実際に見た目へ効いているのはReflection Probe側のみ。** マテリアル色側
@@ -600,7 +604,7 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
 5. **パネル整理**（本家ファイルへの変更不要） — `ResoniteLinkWindow.cs`（メインパネル）は
    接続・Send Current Scene・Realtime Mode・本家由来のConvert Skyboxトグル1個のみに整理。
    オーバーレイ独自の機能（部分送信・再試行・ログ・調整スライダー類）は全て**Lightmap
-   Bake & Send**パネル（`LightmapPipelineWindow.cs`）側に集約。
+   Baker**パネル（`LightmapPipelineWindow.cs`）側に集約。
 6. **水面マテリアル自動検出**（新規） — `WaterPanningConverter.cs`がシェーダー名に"water"を
    含む任意のカスタムシェーダーを検出し、実在するResoniteワールドの水面表現パターン
    （PBS_Metallic + Panner2D UVスクロール）へ変換。
@@ -625,10 +629,12 @@ UnityのPPv2 Neutral Tonemapper相当の色調圧縮を再現し、マテリア�
     GameObject自体が丸ごと破棄される場合（HierarchyでLightを削除、あるいはBakeryがベイク中に
     一時シーンを畳む時等——実機確認済み、Bakeryでベイクする度に大量の警告が出ていた）は、
     ラッパーは既に同じ破棄連鎖の中で消えており、そこへの再破棄が警告の原因だった。
-11. **Lightmap Bake & Sendパネル**（新規、`Assets/Editor/`） — `LightmapPipelineWindow.cs`
-    （メニュー: `Resonite SDK > Lightmap Bake & Send`）が「品質プリセット選択→ベイク→送信」を
-    `Bake & Send`ボタン1つに集約する。対象はBakery（導入されていれば）またはUnity標準
-    Progressive Lightmapperのどちらでも。単体の`Bake`/`Convert Lights`/部分送信ボタン、
+11. **Lightmap Bakerパネル**（新規、`Assets/Editor/`） — `LightmapPipelineWindow.cs`
+    （メニュー: `Resonite SDK > Lightmap Baker`）が「品質プリセット選択→ベイク」を
+    `Bake`ボタン1つに集約する。対象はBakery（導入されていれば）またはUnity標準
+    Progressive Lightmapperのどちらでも。送信は意図的にここへ重複させていない——
+    ベイク後は本家`Resonite SDK Manager`パネルの`Send Current Scene`を使う（旧`Bake & Send`
+    統合ボタンは冗長として撤去済み）。単体の`Convert Lights`/部分送信ボタン、
     Unity標準経路向けのライティング調整セクション（環境光/影/太陽の各つまみ）、実験的な
     「法線を焼き込む」オプション、「送信時オプション」セクション（Force Refresh Generated
     Lightmaps / Send Tonemap Compensationトグル。本家Resonite.UnitySDK非搭載のオーバーレイ
@@ -768,8 +774,8 @@ Assets/ResoniteSDK/
 ```
 
 ```
-Assets/Editor/                                  ← Lightmap Bake & Send panel (sibling of ResoniteSDK/, all new)
-├── LightmapPipelineWindow.cs                  ★new "pick preset → Bake & Send" one-button panel
+Assets/Editor/                                  ← Lightmap Baker panel (sibling of ResoniteSDK/, all new)
+├── LightmapPipelineWindow.cs                  ★new "pick preset → Bake" one-button panel (menu: Lightmap Baker)
 ├── LightmapTestHarness.cs                     ★new actual bake/send logic (also file-command drivable)
 ├── BakeryPresenceDefine.cs                    ★new auto-detects Bakery (BAKERY_INCLUDED)
 ├── BakeryTempObjectSuppression.cs             ★new excludes Bakery's temp storage object from sends
