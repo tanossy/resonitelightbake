@@ -24,7 +24,24 @@ public static class LightTuning
     // as unnecessary; light color now passes through unchanged, same as before that feature
     // existed.
 
-    public static float ApplyIntensity(float unityIntensity) => unityIntensity * GetEffectiveIntensityMultiplier();
+    // Resonite's light Color is Linear, but Intensity is interpreted in Gamma space (per a
+    // live-observed report from another Resonite user working on the same lightbake-import
+    // problem) - a raw value gets gamma-decoded (~x^2.2) on arrival, landing darker than
+    // intended. Pre-correcting with the inverse (x^(1/2.2)) below cancels that back out, the
+    // same principle as encoding an sRGB texture so a display's own decode recovers the
+    // original value. This changes what IntensityCeiling means (now "desired linear
+    // brightness" rather than "raw sent value") - unverified live as of this change; expect to
+    // need a fresh IntensityCeiling once checked against a running Resonite session.
+    public static float ApplyIntensity(float unityIntensity)
+    {
+        float desiredLinearIntensity = unityIntensity * GetEffectiveIntensityMultiplier();
+
+        return Mathf.Pow(desiredLinearIntensity, 1f / GammaExponent);
+    }
+
+    // Standard display gamma - the value to adjust if 2.2 doesn't match Resonite's actual
+    // decode curve once checked live.
+    const float GammaExponent = 2.2f;
 
     // Recomputed from the live scene on every call rather than cached: this only runs during
     // Editor-time scene conversion (never per-frame), so a fresh scan is cheap and avoids a stale
